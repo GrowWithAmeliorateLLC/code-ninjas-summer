@@ -41,7 +41,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('email')
   const [emailPreview, setEmailPreview] = useState(false)
 
-  const genMessages = ['Fetching camps from ClickUp\u2026', 'Reading task details\u2026', 'Generating email, SMS & caption\u2026', 'Almost done\u2026']
+  const genMessages = [
+    'Fetching camps from ClickUp...',
+    'Reading task details...',
+    'Generating email, SMS & caption...',
+    'Almost done...'
+  ]
 
   async function handleGenerate() {
     if (!listName.trim() || !startDate) { setError('Please enter a ClickUp list name and a start date.'); return }
@@ -69,7 +74,11 @@ export default function App() {
     finally { setSaving(false) }
   }
 
-  const tabs = [{ id: 'email', label: '\uD83D\uDCE7 Email' }, { id: 'sms', label: '\uD83D\uDCAC SMS' }, { id: 'social', label: '\uD83D\uDCF1 Social' }]
+  const tabs = [
+    { id: 'email', label: '\uD83D\uDCE7 Email' },
+    { id: 'sms', label: '\uD83D\uDCAC SMS' },
+    { id: 'social', label: '\uD83D\uDCF1 Social' }
+  ]
   const smsLen = result?.sms?.length || 0
 
   return (
@@ -83,7 +92,6 @@ export default function App() {
             <p style={{ fontSize: 17, color: '#fff', fontWeight: 700 }}>Camp Content Generator</p>
           </div>
         </div>
-
         <div style={{ maxWidth: 800, margin: '0 auto', padding: '32px 20px' }}>
           <div style={{ background: '#181818', borderRadius: 12, border: '1px solid #2a2a2a', padding: '24px 28px', marginBottom: 24 }}>
             <p style={{ fontSize: 11, color: '#666', fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 18 }}>Generate Content Package</p>
@@ -100,14 +108,12 @@ export default function App() {
               </div>
               <button onClick={handleGenerate} disabled={generating || saving}
                 style={{ background: (generating || saving) ? '#222' : `linear-gradient(135deg, ${CN_BLUE}, #2478a0)`, color: (generating || saving) ? '#555' : '#fff', border: 'none', borderRadius: 8, padding: '11px 26px', fontSize: 14, fontWeight: 700, cursor: (generating || saving) ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                {generating ? 'Generating\u2026' : '\u26A1 Generate'}
+                {generating ? 'Generating...' : '\u26A1 Generate'}
               </button>
             </div>
             {error && <div style={{ marginTop: 14, padding: '11px 14px', background: '#2a1010', border: '1px solid #7a2a2a', borderRadius: 8 }}><p style={{ color: '#f87171', fontSize: 13 }}>\u26A0\uFE0F {error}</p></div>}
           </div>
-
           {generating && <div style={{ background: '#181818', borderRadius: 12, border: '1px solid #2a2a2a' }}><Spinner message={genMsg} /></div>}
-
           {!result && !generating && (
             <div style={{ background: '#181818', borderRadius: 12, border: '1px dashed #2a2a2a', padding: '52px 24px', textAlign: 'center' }}>
               <div style={{ fontSize: 36, marginBottom: 10 }}>\uD83E\uDD77</div>
@@ -115,14 +121,13 @@ export default function App() {
               <p style={{ fontSize: 13, color: '#555', lineHeight: 1.7 }}>Enter a ClickUp list name and the Monday of the camp week,<br />then hit Generate to build your full content package.</p>
             </div>
           )}
-
           {result && !generating && (
             <div style={{ background: '#181818', borderRadius: 12, border: '1px solid #2a2a2a', overflow: 'hidden' }}>
               <div style={{ background: '#000', padding: '16px 22px', borderBottom: '1px solid #222' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
                   <div>
                     <p style={{ fontSize: 11, color: CN_BLUE, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 3 }}>{result.week_label}</p>
-                    <p style={{ fontSize: 16, color: '#fff', fontWeight: 700 }}>Code Ninjas {result.location} \u2014 {result.camps?.length || 0} camp{result.camps?.length !== 1 ? 's' : ''}</p>
+                    <p style={{ fontSize: 16, color: '#fff', fontWeight: 700 }}>Code Ninjas {result.location} — {result.camps?.length || 0} camp{result.camps?.length !== 1 ? 's' : ''}</p>
                     <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {result.camps?.map((c, i) => <span key={i} style={{ background: '#1a1a1a', border: `1px solid ${CN_BLUE}44`, color: CN_BLUE, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>{c.name}</span>)}
                     </div>
@@ -136,21 +141,14 @@ export default function App() {
                   ) : (
                     <button onClick={handleSaveToClickUp} disabled={saving}
                       style={{ background: saving ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${saving ? '#333' : CN_BLUE}`, color: saving ? '#555' : CN_BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                      {saving ? <><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: CN_BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving\u2026</> : '\uD83D\uDCCC Save to ClickUp'}
+                      {saving ? <><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: CN_BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</> : '\uD83D\uDCCC Save to ClickUp'}
                     </button>
                   )}
                 </div>
               </div>
-
               <div style={{ display: 'flex', borderBottom: '2px solid #222', padding: '0 22px', background: '#111' }}>
-                {tabs.map(t => (
-                  <button key={t.id} onClick={() => setActiveTab(t.id)}
-                    style={{ padding: '10px 18px', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', border: 'none', borderBottom: activeTab === t.id ? `3px solid ${CN_BLUE}` : '3px solid transparent', background: 'transparent', color: activeTab === t.id ? CN_BLUE : '#666', cursor: 'pointer', marginBottom: -2 }}>
-                    {t.label}
-                  </button>
-                ))}
+                {tabs.map(t => <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ padding: '10px 18px', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', border: 'none', borderBottom: activeTab === t.id ? `3px solid ${CN_BLUE}` : '3px solid transparent', background: 'transparent', color: activeTab === t.id ? CN_BLUE : '#666', cursor: 'pointer', marginBottom: -2 }}>{t.label}</button>)}
               </div>
-
               <div style={{ padding: '22px' }}>
                 {activeTab === 'email' && (
                   <div>
@@ -161,9 +159,7 @@ export default function App() {
                         <CopyBtn text={result.email_html} label="Copy HTML" />
                       </div>
                     </div>
-                    {emailPreview
-                      ? <div style={{ border: '1px solid #333', borderRadius: 8, overflow: 'hidden', background: '#fff' }}><iframe srcDoc={result.email_html} style={{ width: '100%', minHeight: 540, border: 'none', display: 'block' }} title="Email Preview" /></div>
-                      : <textarea readOnly value={result.email_html} style={{ width: '100%', height: 300, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 8, color: '#7dd3fc', fontSize: 11, fontFamily: 'monospace', padding: 14, resize: 'vertical', outline: 'none', lineHeight: 1.5 }} />}
+                    {emailPreview ? <div style={{ border: '1px solid #333', borderRadius: 8, overflow: 'hidden', background: '#fff' }}><iframe srcDoc={result.email_html} style={{ width: '100%', minHeight: 540, border: 'none', display: 'block' }} title="Email Preview" /></div> : <textarea readOnly value={result.email_html} style={{ width: '100%', height: 300, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 8, color: '#7dd3fc', fontSize: 11, fontFamily: 'monospace', padding: 14, resize: 'vertical', outline: 'none', lineHeight: 1.5 }} />}
                   </div>
                 )}
                 {activeTab === 'sms' && (
@@ -174,7 +170,7 @@ export default function App() {
                     </div>
                     <div style={{ background: '#0d0d0d', border: `1.5px solid ${CN_BLUE}33`, borderRadius: 10, padding: '18px 20px' }}>
                       <p style={{ fontSize: 15, color: '#e2e8f0', lineHeight: 1.75 }}>{result.sms}</p>
-                      <p style={{ marginTop: 12, fontSize: 12, color: smsLen > 160 ? '#f87171' : '#555' }}>{smsLen} chars {smsLen > 160 ? '\u26A0\uFE0F over 160 \u2014 trim before sending' : '\u2713'}</p>
+                      <p style={{ marginTop: 12, fontSize: 12, color: smsLen > 160 ? '#f87171' : '#555' }}>{smsLen} chars {smsLen > 160 ? '\u26A0\uFE0F over 160 — trim before sending' : '\u2713'}</p>
                     </div>
                   </div>
                 )}
@@ -190,7 +186,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-
               <div style={{ borderTop: '1px solid #222', padding: '12px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <p style={{ fontSize: 11, color: '#444' }}>Need changes? Update inputs and regenerate.</p>
                 <button onClick={handleGenerate} disabled={generating} style={{ background: 'transparent', border: `1px solid ${CN_BLUE}`, color: CN_BLUE, borderRadius: 6, padding: '7px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>\u21BB Regenerate</button>
