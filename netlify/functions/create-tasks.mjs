@@ -32,20 +32,20 @@ export default async (req) => {
     : weekLabel.replace('Week of ', '').toUpperCase()
   const parentName = `CAMPS WEEK OF ${dateStr}`
 
-  // Due date = 5 days before camp week start (milliseconds for ClickUp)
-  const dueDateMs = startDate
-    ? new Date(startDate + 'T12:00:00Z').getTime() - (5 * 24 * 60 * 60 * 1000)
-    : null
+  // Parent due date = camp week start date
+  // Email subtask due date = 5 days before camp week start
+  const campStartMs = startDate ? new Date(startDate + 'T12:00:00Z').getTime() : null
+  const emailDueDateMs = campStartMs ? campStartMs - (5 * 24 * 60 * 60 * 1000) : null
 
-  const parent = await createTask(listId, parentName, null, null, dueDateMs, CLICKUP_TOKEN)
+  const parent = await createTask(listId, parentName, null, null, campStartMs, CLICKUP_TOKEN)
   if (!parent.id) return Response.json({ error: 'Failed to create parent task: ' + (parent.err || JSON.stringify(parent)) }, { status: 500 })
 
-  // Email subtask: HTML in Content field, subject line in Text field
+  // Email subtask: HTML in Content field, subject line in Text field, due 5 days before camp
   const emailFields = [
     { id: CONTENT_FIELD_ID, value: emailHtml || '' },
     ...(subjectLine ? [{ id: TEXT_FIELD_ID, value: subjectLine }] : [])
   ]
-  const emailTask = await createTask(listId, 'Email', parent.id, emailFields, null, CLICKUP_TOKEN)
+  const emailTask = await createTask(listId, 'Email', parent.id, emailFields, emailDueDateMs, CLICKUP_TOKEN)
 
   return Response.json({
     parentName,
