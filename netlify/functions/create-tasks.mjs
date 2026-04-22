@@ -1,9 +1,10 @@
 const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
 
-async function createTask(listId, name, parentId, content, token) {
+async function createTask(listId, name, parentId, content, description, token) {
   const body = { name }
   if (parentId) body.parent = parentId
   if (content) body.custom_fields = [{ id: CONTENT_FIELD_ID, value: content }]
+  if (description) body.description = description
   const res = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
     method: 'POST',
     headers: { Authorization: token, 'Content-Type': 'application/json' },
@@ -21,7 +22,7 @@ export default async (req) => {
   let body
   try { body = await req.json() } catch { return Response.json({ error: 'Invalid request body' }, { status: 400 }) }
 
-  const { listId, weekLabel, startDate, emailHtml } = body
+  const { listId, weekLabel, startDate, emailHtml, subjectLine } = body
   if (!listId || !weekLabel) return Response.json({ error: 'Missing listId or weekLabel' }, { status: 400 })
 
   const dateObj = new Date((startDate || '') + 'T12:00:00Z')
@@ -30,10 +31,11 @@ export default async (req) => {
     : weekLabel.replace('Week of ', '').toUpperCase()
   const parentName = `CAMPS WEEK OF ${dateStr}`
 
-  const parent = await createTask(listId, parentName, null, null, CLICKUP_TOKEN)
+  const parent = await createTask(listId, parentName, null, null, null, CLICKUP_TOKEN)
   if (!parent.id) return Response.json({ error: 'Failed to create parent task: ' + (parent.err || JSON.stringify(parent)) }, { status: 500 })
 
-  const emailTask = await createTask(listId, 'Email', parent.id, emailHtml || '', CLICKUP_TOKEN)
+  // Email subtask: HTML goes in Content custom field, subject line goes in the description (TEXT field)
+  const emailTask = await createTask(listId, 'Email', parent.id, emailHtml || '', subjectLine || '', CLICKUP_TOKEN)
 
   return Response.json({
     parentName,

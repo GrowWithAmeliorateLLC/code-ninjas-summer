@@ -34,7 +34,6 @@ function extractUrl(text) {
 }
 
 function findScheduleUrl(tasks) {
-  // Priority: task/subtask with "mystudio" in name
   for (const task of tasks) {
     const name = (task.name || '').toLowerCase()
     if (name.includes('mystudio') || name.includes('my studio')) {
@@ -48,7 +47,6 @@ function findScheduleUrl(tasks) {
       }
     }
   }
-  // Fallback: scan descriptions of non-camp tasks for mystudio/schedule links
   for (const task of tasks) {
     const bookingUrl = getFieldValue(task, BOOKING_URL_FIELD_ID)
     if (bookingUrl) continue
@@ -63,7 +61,7 @@ function findScheduleUrl(tasks) {
 
 const EMAIL_SYSTEM_PROMPT = `You are a Code Ninjas marketing content specialist.
 
-Given camp data, produce an HTML email. Respond ONLY with valid JSON - no markdown fences, no extra text.
+Given camp data, produce an HTML email AND a subject line. Respond ONLY with valid JSON - no markdown fences, no extra text.
 
 RULES:
 - Colors: black #000000, CN blue #338fbf
@@ -78,18 +76,27 @@ RULES:
 - One card per camp: black header with camp name, blue time badge, short description, blue CTA button linking to booking_url
 - EMAIL must be full self-contained HTML with inline CSS (email-safe)
 
+SUBJECT LINE RULES:
+- Max 5 words
+- Include exactly one emoji
+- Make it punchy and parent-focused (curiosity, excitement, urgency)
+- Do NOT include the dojo name or location
+- Examples: "Spots filling fast! Register now", "Summer camps are here!", "Your kid will love this"
+
 OUTPUT (valid JSON only):
 {
   "location": "title case dojo name",
   "week_label": "Week of Month Day",
+  "subject_line": "...",
   "camps": [{"name":"","time":"","session":"","description":"","booking_url":""}],
   "email_html": "..."
 }`
 
-const REVISION_SYSTEM_PROMPT = `You are revising an HTML email for Code Ninjas.
+const REVISION_SYSTEM_PROMPT = `You are revising an HTML email and subject line for Code Ninjas.
 Apply the requested revisions while keeping all links, brand colors (#000000, #338fbf), CN logo, and structure intact.
 Do NOT add pricing, specific dates, or footer content.
-Respond ONLY with valid JSON: {"email_html": "...revised full HTML..."}`
+If revisions mention the subject line, update it too (max 5 words, one emoji).
+Respond ONLY with valid JSON: {"email_html": "...revised full HTML...", "subject_line": "..."}`
 
 export default async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
@@ -115,7 +122,7 @@ export default async (req) => {
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 8000,
         system: REVISION_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: `Current email HTML:\n${currentEmailHtml}\n\nRevisions requested: ${revisionInstructions}` }]
+        messages: [{ role: 'user', content: `Current subject line: ${preservedData?.subject_line || ''}\n\nCurrent email HTML:\n${currentEmailHtml}\n\nRevisions requested: ${revisionInstructions}` }]
       })
     })
     const revData = await revRes.json()
@@ -124,7 +131,11 @@ export default async (req) => {
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
     let parsed
     try { parsed = JSON.parse(clean) } catch { return Response.json({ error: 'Failed to parse revision response.' }, { status: 500 }) }
-    return Response.json({ ...preservedData, email_html: parsed.email_html })
+    return Response.json({
+      ...preservedData,
+      email_html: parsed.email_html,
+      subject_line: parsed.subject_line || preservedData?.subject_line
+    })
   }
 
   // --- GENERATE MODE ---
@@ -133,7 +144,6 @@ export default async (req) => {
   const listId = await findListByName(listName, CLICKUP_TOKEN)
   if (!listId) return Response.json({ error: `List "${listName}" not found in the CODE NINJAS space.` }, { status: 404 })
 
-  // Fetch tasks WITH subtasks to find the MyStudio schedule URL
   const tasksRes = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task?archived=false&subtasks=true&include_closed=true`, { headers: { Authorization: CLICKUP_TOKEN } })
   const tasksData = await tasksRes.json()
   const allTasks = tasksData.tasks || []
@@ -173,7 +183,7 @@ Schedule URL: ${scheduleUrl || 'not found'}
 Camps (${camps.length}):
 ${JSON.stringify(camps, null, 2)}
 
-Generate the email HTML as JSON.`
+Generate the email HTML and subject line as JSON.`
 
   const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

@@ -75,12 +75,12 @@ export default function App() {
           startDate,
           revisionInstructions: revisionText.trim(),
           currentEmailHtml: result.email_html,
-          preservedData: { location: result.location, week_label: result.week_label, camps: result.camps, listId: result.listId, schedule_url: result.schedule_url }
+          preservedData: { location: result.location, week_label: result.week_label, camps: result.camps, listId: result.listId, schedule_url: result.schedule_url, subject_line: result.subject_line }
         })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Revision failed')
-      setResult(prev => ({ ...prev, email_html: data.email_html }))
+      setResult(prev => ({ ...prev, email_html: data.email_html, subject_line: data.subject_line || prev.subject_line }))
       setRevisionText('')
       setEmailPreview(false)
     } catch (err) { setError(err.message) }
@@ -93,7 +93,7 @@ export default function App() {
     try {
       const res = await fetch('/api/create-tasks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listName: listName.trim(), listId: result.listId, weekLabel: result.week_label, startDate, emailHtml: result.email_html })
+        body: JSON.stringify({ listName: listName.trim(), listId: result.listId, weekLabel: result.week_label, startDate, emailHtml: result.email_html, subjectLine: result.subject_line })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save to ClickUp')
@@ -209,6 +209,17 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Subject line bar */}
+              {result.subject_line && (
+                <div style={{ background: '#0f1a0f', borderBottom: '1px solid #1a2a1a', padding: '12px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 10, color: '#555', fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>Subject</span>
+                    <span style={{ fontSize: 14, color: LIME, fontWeight: 600 }}>{result.subject_line}</span>
+                  </div>
+                  <CopyBtn text={result.subject_line} label="Copy Subject" />
+                </div>
+              )}
+
               <div style={{ padding: '22px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                   <p style={{ fontSize: 12, color: '#666' }}>Paste into Mailchimp as a custom code block.</p>
@@ -231,7 +242,7 @@ export default function App() {
                   <textarea
                     value={revisionText}
                     onChange={e => setRevisionText(e.target.value)}
-                    placeholder="e.g. Make the intro shorter. Change the CTA button text to Register Now. Add a note about limited spots."
+                    placeholder="e.g. Make the intro shorter. Change the CTA to Register Now. Try a different subject line."
                     style={{ flex: 1, background: '#0d0d0d', color: '#e2e8f0', border: `1.5px solid ${revisionText ? LIME : '#333'}`, borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', resize: 'none', height: 68, lineHeight: 1.5, fontFamily: 'DM Sans, sans-serif' }}
                     onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleRevise() }}
                   />
@@ -243,7 +254,7 @@ export default function App() {
                     {revising ? 'Revising...' : 'Apply Revisions'}
                   </button>
                 </div>
-                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>Cmd+Enter to apply. Revisions update the email above without losing your inputs.</p>
+                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>Cmd+Enter to apply. You can also ask to try a different subject line.</p>
               </div>
 
               <div style={{ borderTop: '1px solid #222', padding: '12px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
