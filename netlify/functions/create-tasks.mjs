@@ -1,10 +1,10 @@
 const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
+const TEXT_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
 
-async function createTask(listId, name, parentId, content, description, dueDate, token) {
+async function createTask(listId, name, parentId, customFields, dueDate, token) {
   const body = { name }
   if (parentId) body.parent = parentId
-  if (content) body.custom_fields = [{ id: CONTENT_FIELD_ID, value: content }]
-  if (description) body.description = description
+  if (customFields?.length) body.custom_fields = customFields
   if (dueDate) body.due_date = dueDate
   const res = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
     method: 'POST',
@@ -37,11 +37,15 @@ export default async (req) => {
     ? new Date(startDate + 'T12:00:00Z').getTime() - (5 * 24 * 60 * 60 * 1000)
     : null
 
-  const parent = await createTask(listId, parentName, null, null, null, dueDateMs, CLICKUP_TOKEN)
+  const parent = await createTask(listId, parentName, null, null, dueDateMs, CLICKUP_TOKEN)
   if (!parent.id) return Response.json({ error: 'Failed to create parent task: ' + (parent.err || JSON.stringify(parent)) }, { status: 500 })
 
-  // Email subtask: HTML in Content field, subject line in description (TEXT field)
-  const emailTask = await createTask(listId, 'Email', parent.id, emailHtml || '', subjectLine || '', null, CLICKUP_TOKEN)
+  // Email subtask: HTML in Content field, subject line in Text field
+  const emailFields = [
+    { id: CONTENT_FIELD_ID, value: emailHtml || '' },
+    ...(subjectLine ? [{ id: TEXT_FIELD_ID, value: subjectLine }] : [])
+  ]
+  const emailTask = await createTask(listId, 'Email', parent.id, emailFields, null, CLICKUP_TOKEN)
 
   return Response.json({
     parentName,
