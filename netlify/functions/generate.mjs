@@ -1,6 +1,7 @@
 const SPACE_ID = '901313618762'
 const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
 const BOOKING_URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
+const DEFAULT_SUBJECT = '\uD83D\uDC40 Next Week\'s Camps'
 
 async function findListByName(listName, token) {
   const headers = { Authorization: token }
@@ -61,7 +62,7 @@ function findScheduleUrl(tasks) {
 
 const EMAIL_SYSTEM_PROMPT = `You are a Code Ninjas marketing content specialist.
 
-Given camp data, produce an HTML email AND a subject line. Respond ONLY with valid JSON - no markdown fences, no extra text.
+Given camp data, produce an HTML email. Respond ONLY with valid JSON - no markdown fences, no extra text.
 
 RULES:
 - Colors: black #000000, CN blue #338fbf
@@ -76,27 +77,18 @@ RULES:
 - One card per camp: black header with camp name, blue time badge, short description, blue CTA button linking to booking_url
 - EMAIL must be full self-contained HTML with inline CSS (email-safe)
 
-SUBJECT LINE RULES:
-- Max 5 words
-- Include exactly one emoji
-- Make it punchy and parent-focused (curiosity, excitement, urgency)
-- Do NOT include the dojo name or location
-- Examples: "Spots filling fast! Register now", "Summer camps are here!", "Your kid will love this"
-
 OUTPUT (valid JSON only):
 {
   "location": "title case dojo name",
   "week_label": "Week of Month Day",
-  "subject_line": "...",
   "camps": [{"name":"","time":"","session":"","description":"","booking_url":""}],
   "email_html": "..."
 }`
 
-const REVISION_SYSTEM_PROMPT = `You are revising an HTML email and subject line for Code Ninjas.
+const REVISION_SYSTEM_PROMPT = `You are revising an HTML email for Code Ninjas.
 Apply the requested revisions while keeping all links, brand colors (#000000, #338fbf), CN logo, and structure intact.
 Do NOT add pricing, specific dates, or footer content.
-If revisions mention the subject line, update it too (max 5 words, one emoji).
-Respond ONLY with valid JSON: {"email_html": "...revised full HTML...", "subject_line": "..."}`
+Respond ONLY with valid JSON: {"email_html": "...revised full HTML..."}`
 
 export default async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
@@ -122,7 +114,7 @@ export default async (req) => {
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 8000,
         system: REVISION_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: `Current subject line: ${preservedData?.subject_line || ''}\n\nCurrent email HTML:\n${currentEmailHtml}\n\nRevisions requested: ${revisionInstructions}` }]
+        messages: [{ role: 'user', content: `Current email HTML:\n${currentEmailHtml}\n\nRevisions requested: ${revisionInstructions}` }]
       })
     })
     const revData = await revRes.json()
@@ -131,11 +123,7 @@ export default async (req) => {
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
     let parsed
     try { parsed = JSON.parse(clean) } catch { return Response.json({ error: 'Failed to parse revision response.' }, { status: 500 }) }
-    return Response.json({
-      ...preservedData,
-      email_html: parsed.email_html,
-      subject_line: parsed.subject_line || preservedData?.subject_line
-    })
+    return Response.json({ ...preservedData, email_html: parsed.email_html })
   }
 
   // --- GENERATE MODE ---
@@ -183,7 +171,7 @@ Schedule URL: ${scheduleUrl || 'not found'}
 Camps (${camps.length}):
 ${JSON.stringify(camps, null, 2)}
 
-Generate the email HTML and subject line as JSON.`
+Generate the email HTML as JSON.`
 
   const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -200,7 +188,7 @@ Generate the email HTML and subject line as JSON.`
   let parsed
   try { parsed = JSON.parse(clean) } catch { return Response.json({ error: 'Failed to parse AI response.' }, { status: 500 }) }
 
-  return Response.json({ ...parsed, listId, schedule_url: scheduleUrl })
+  return Response.json({ ...parsed, listId, schedule_url: scheduleUrl, subject_line: DEFAULT_SUBJECT })
 }
 
 export const config = { path: '/api/generate' }
