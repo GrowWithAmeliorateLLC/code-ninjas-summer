@@ -70,6 +70,7 @@ RULES:
 - All links: target="_blank" rel="noopener noreferrer"
 - Tone: engaging, parent-friendly
 - Rewrite descriptions in your own words (do not copy verbatim)
+- Keep each camp description to 2-3 sentences max to stay within output limits
 - NO specific dates in email body - use week label only
 - NO pricing or admin fees - do not mention cost anywhere
 - NO footer (Mailchimp handles that)
@@ -112,7 +113,7 @@ export default async (req) => {
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 8000,
+        max_tokens: 16000,
         system: REVISION_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: `Current email HTML:\n${currentEmailHtml}\n\nRevisions requested: ${revisionInstructions}` }]
       })
@@ -122,7 +123,11 @@ export default async (req) => {
     const raw = (revData.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
     let parsed
-    try { parsed = JSON.parse(clean) } catch { return Response.json({ error: 'Failed to parse revision response.' }, { status: 500 }) }
+    try {
+      parsed = JSON.parse(clean)
+    } catch {
+      return Response.json({ error: `Failed to parse revision response. Raw start: ${clean.slice(0, 200)}` }, { status: 500 })
+    }
     return Response.json({ ...preservedData, email_html: parsed.email_html })
   }
 
@@ -153,9 +158,10 @@ export default async (req) => {
 
   const scheduleUrl = findScheduleUrl(allTasks)
 
+  // Trim descriptions to 500 chars max to prevent token overrun on large weeks
   const camps = campTasks.map(t => ({
     name: t.name,
-    description: getFieldValue(t, CONTENT_FIELD_ID).replace(/&nbsp;/g, ' ').trim(),
+    description: getFieldValue(t, CONTENT_FIELD_ID).replace(/&nbsp;/g, ' ').trim().slice(0, 500),
     booking_url: getFieldValue(t, BOOKING_URL_FIELD_ID),
     time: t.name.toLowerCase().includes('full day') ? '8:30 AM - 3:00 PM' : '8:30 AM - 11:30 AM',
     session: t.name.toLowerCase().includes('full day') ? 'Full Day' : 'Half Day'
@@ -176,17 +182,24 @@ Generate the email HTML as JSON.`
   const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 8000, system: EMAIL_SYSTEM_PROMPT, messages: [{ role: 'user', content: userMsg }] })
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 16000, system: EMAIL_SYSTEM_PROMPT, messages: [{ role: 'user', content: userMsg }] })
   })
 
   const anthropicData = await anthropicRes.json()
   if (anthropicData.error) return Response.json({ error: 'Anthropic: ' + anthropicData.error.message }, { status: 500 })
 
+  // Check for truncation
+  const stopReason = anthropicData.stop_reason
   const raw = (anthropicData.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
 
   let parsed
-  try { parsed = JSON.parse(clean) } catch { return Response.json({ error: 'Failed to parse AI response.' }, { status: 500 }) }
+  try {
+    parsed = JSON.parse(clean)
+  } catch {
+    const hint = stopReason === 'max_tokens' ? ' (response was truncated — too many camps or descriptions too long)' : ''
+    return Response.json({ error: `Failed to parse AI response${hint}. Raw start: ${clean.slice(0, 200)}` }, { status: 500 })
+  }
 
   return Response.json({ ...parsed, listId, schedule_url: scheduleUrl, subject_line: DEFAULT_SUBJECT })
 }
