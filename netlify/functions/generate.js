@@ -3,7 +3,6 @@ const CU_BASE = 'https://api.clickup.com/api/v2'
 const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
 const URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
 const DEFAULT_SUBJECT = '\u{1F440} Summer Camps Starting Soon'
-const CN_FALLBACK_URL = 'https://www.codeninjas.com'
 
 function getCampColor(name) {
   const n = name.toLowerCase()
@@ -87,7 +86,6 @@ function buildCampCard(camp) {
 }
 
 function buildEmailHtml({ location, week_label, imageUrl, camps, schedule_url, intro, subject_line }) {
-  const ctaHref = schedule_url || CN_FALLBACK_URL
   const heroBlock = imageUrl ? `
         <tr>
           <td style="padding:0;line-height:0;">
@@ -98,6 +96,7 @@ function buildEmailHtml({ location, week_label, imageUrl, camps, schedule_url, i
   const introHtml = intro
     ? `\n        <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;text-align:center;"><p style="font-family:Arial,Helvetica,sans-serif;margin:0;font-size:15px;color:#444444;line-height:1.7;">${intro}</p></td></tr>`
     : ''
+  const ctaHref = schedule_url || 'https://www.codeninjas.com'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -206,7 +205,7 @@ async function generateSnippets(camps, location, weekLabel) {
 
   const prompt = `You are writing copy for a Code Ninjas ${location} summer camp email for the week of ${weekLabel}.
 
-Below is a numbered list of camps. You MUST return one snippet per camp, in the SAME ORDER and COUNT as the input list. Even if no description is provided, write a compelling 1-2 sentence snippet based on the camp name alone — mention what kids will build, create, or explore.
+Below is a numbered list of camps. You MUST return one snippet per camp, in the SAME ORDER and COUNT as the input list. Even if no description is provided, write a compelling 1-2 sentence snippet based on the camp name alone \u2014 mention what kids will build, create, or explore.
 
 Camps:
 ${campList}
@@ -236,7 +235,7 @@ async function reviseEmail(currentHtml, instructions, preservedData) {
 
 Instructions: ${instructions}
 
-Rules: never use day names in dates, never use AM/PM, keep all booking URLs unchanged, keep the "View All Camps & Register" button URL unchanged.
+Rules: never use day names in dates, never use AM/PM, keep all booking URLs unchanged.
 
 Return ONLY the complete updated HTML, no explanation.
 
@@ -305,13 +304,13 @@ export default async (req) => {
       snippet: aiContent.camps?.[i]?.snippet || ''
     }))
 
-    const schedule_url = scheduleUrl || CN_FALLBACK_URL
+    const resolvedScheduleUrl = scheduleUrl || ''
 
     const email_html = buildEmailHtml({
       location, week_label,
       imageUrl: imageUrl || null,
       camps,
-      schedule_url,
+      schedule_url: resolvedScheduleUrl,
       intro: aiContent.intro || '',
       subject_line: aiContent.subject_line || DEFAULT_SUBJECT
     })
@@ -322,7 +321,7 @@ export default async (req) => {
       location, week_label,
       camps: camps.map(c => ({ name: c.name })),
       listId,
-      schedule_url
+      schedule_url: resolvedScheduleUrl
     })
 
   } catch (err) {
