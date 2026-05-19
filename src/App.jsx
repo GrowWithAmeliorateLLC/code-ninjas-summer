@@ -35,6 +35,7 @@ function CopyBtn({ text, label }) {
 export default function App() {
   const [listName, setListName] = useState('')
   const [startDate, setStartDate] = useState('')
+  const [imageUrl, setImageUrl] = useState('')
   const [generating, setGenerating] = useState(false)
   const [revising, setRevising] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -45,7 +46,7 @@ export default function App() {
   const [emailPreview, setEmailPreview] = useState(false)
   const [revisionText, setRevisionText] = useState('')
 
-  const genMessages = ['Fetching camps from ClickUp...', 'Reading task details...', 'Generating email...', 'Almost done...']
+  const genMessages = ['Fetching camps from ClickUp...', 'Reading camp details...', 'Writing snippets...', 'Building email...', 'Almost done...']
 
   async function handleGenerate() {
     if (!listName.trim() || !startDate) { setError('Please enter a ClickUp list name and a start date.'); return }
@@ -55,7 +56,7 @@ export default function App() {
     try {
       const res = await fetch('/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listName: listName.trim(), startDate })
+        body: JSON.stringify({ listName: listName.trim(), startDate, imageUrl: imageUrl.trim() || null })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
@@ -73,6 +74,7 @@ export default function App() {
         body: JSON.stringify({
           listName: listName.trim(),
           startDate,
+          imageUrl: imageUrl.trim() || null,
           revisionInstructions: revisionText.trim(),
           currentEmailHtml: result.email_html,
           preservedData: { location: result.location, week_label: result.week_label, camps: result.camps, listId: result.listId, schedule_url: result.schedule_url, subject_line: result.subject_line }
@@ -102,6 +104,8 @@ export default function App() {
     finally { setSaving(false) }
   }
 
+  const busy = generating || revising || saving
+
   return (
     <>
       <style>{styles}</style>
@@ -119,7 +123,8 @@ export default function App() {
 
           <div style={{ background: '#181818', borderRadius: 12, border: '1px solid #2a2a2a', padding: '24px 28px', marginBottom: 24 }}>
             <p style={{ fontSize: 11, color: '#555', fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 18 }}>Generate Camp Email</p>
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
               <div style={{ flex: '1 1 200px' }}>
                 <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>ClickUp List Name</label>
                 <input
@@ -128,20 +133,34 @@ export default function App() {
                   style={{ width: '100%', background: '#0d0d0d', color: '#fff', border: `1.5px solid ${listName ? BLUE : '#333'}`, borderRadius: 8, padding: '11px 14px', fontSize: 14, outline: 'none' }}
                 />
               </div>
-              <div style={{ flex: '1 1 180px' }}>
-                <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>Camp Week Start Date</label>
+              <div style={{ flex: '1 1 170px' }}>
+                <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>Camp Week Start</label>
                 <input
                   type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
                   style={{ width: '100%', background: '#0d0d0d', color: '#fff', border: `1.5px solid ${startDate ? BLUE : '#333'}`, borderRadius: 8, padding: '11px 14px', fontSize: 14, outline: 'none', colorScheme: 'dark' }}
                 />
               </div>
               <button
-                onClick={handleGenerate} disabled={generating || revising || saving}
-                style={{ background: (generating || revising || saving) ? '#222' : `linear-gradient(135deg, ${LIME}, ${BLUE})`, color: (generating || revising || saving) ? '#555' : '#000', border: 'none', borderRadius: 8, padding: '11px 26px', fontSize: 14, fontWeight: 700, cursor: (generating || revising || saving) ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+                onClick={handleGenerate} disabled={busy}
+                style={{ background: busy ? '#222' : `linear-gradient(135deg, ${LIME}, ${BLUE})`, color: busy ? '#555' : '#000', border: 'none', borderRadius: 8, padding: '11px 26px', fontSize: 14, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
               >
                 {generating ? 'Generating...' : 'Generate'}
               </button>
             </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>
+                Hero Image URL <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="https://storage.googleapis.com/codeninjas-social-content/references/..."
+                value={imageUrl}
+                onChange={e => setImageUrl(e.target.value)}
+                style={{ width: '100%', background: '#0d0d0d', color: '#fff', border: `1.5px solid ${imageUrl ? LIME : '#333'}`, borderRadius: 8, padding: '11px 14px', fontSize: 13, outline: 'none', fontFamily: 'monospace' }}
+              />
+            </div>
+
             {error && (
               <div style={{ marginTop: 14, padding: '11px 14px', background: '#2a1010', border: '1px solid #7a2a2a', borderRadius: 8 }}>
                 <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>
@@ -162,8 +181,8 @@ export default function App() {
               </div>
               <p style={{ fontSize: 16, color: '#fff', fontWeight: 700, marginBottom: 6 }}>Ready to generate</p>
               <p style={{ fontSize: 13, color: '#555', lineHeight: 1.7 }}>
-                Enter a ClickUp list name and the Monday of the camp week,<br />
-                then hit Generate to build the email.
+                Enter a ClickUp list name and the start of the camp week.<br />
+                Add an optional hero image URL, then hit Generate.
               </p>
             </div>
           )}
@@ -181,11 +200,6 @@ export default function App() {
                         <span key={i} style={{ background: '#111', border: `1px solid ${BLUE}44`, color: BLUE, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>{c.name}</span>
                       ))}
                     </div>
-                    {result.schedule_url && (
-                      <p style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
-                        Schedule link: <a href={result.schedule_url} target="_blank" rel="noopener noreferrer" style={{ color: LIME, textDecoration: 'none' }}>{result.schedule_url.length > 60 ? result.schedule_url.slice(0, 60) + '...' : result.schedule_url}</a>
-                      </p>
-                    )}
                   </div>
 
                   {savedTasks ? (
@@ -198,22 +212,19 @@ export default function App() {
                     </div>
                   ) : (
                     <button
-                      onClick={handleSaveToClickUp} disabled={saving}
-                      style={{ background: saving ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${saving ? '#333' : BLUE}`, color: saving ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
+                      onClick={handleSaveToClickUp} disabled={busy}
+                      style={{ background: busy ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${busy ? '#333' : BLUE}`, color: busy ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
                     >
-                      {saving ? (
-                        <><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>
-                      ) : 'Save to ClickUp'}
+                      {saving ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>) : 'Save to ClickUp'}
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Subject line bar */}
               {result.subject_line && (
                 <div style={{ background: '#0f1a0f', borderBottom: '1px solid #1a2a1a', padding: '12px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 10, color: '#555', fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>Subject</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10, color: '#555', fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', flexShrink: 0 }}>Subject</span>
                     <span style={{ fontSize: 14, color: LIME, fontWeight: 600 }}>{result.subject_line}</span>
                   </div>
                   <CopyBtn text={result.subject_line} label="Copy Subject" />
@@ -222,7 +233,7 @@ export default function App() {
 
               <div style={{ padding: '22px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-                  <p style={{ fontSize: 12, color: '#666' }}>Paste into Mailchimp as a custom code block.</p>
+                  <p style={{ fontSize: 12, color: '#666' }}>Paste into Mailchimp, Constant Contact, or LineLeader as a code block.</p>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button onClick={() => setEmailPreview(p => !p)} style={{ background: 'transparent', border: '1px solid #444', color: '#aaa', borderRadius: 6, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                       {emailPreview ? 'View Code' : 'Preview'}
@@ -231,7 +242,7 @@ export default function App() {
                   </div>
                 </div>
                 {emailPreview
-                  ? <div style={{ border: '1px solid #333', borderRadius: 8, overflow: 'hidden', background: '#fff' }}><iframe srcDoc={result.email_html} style={{ width: '100%', minHeight: 560, border: 'none', display: 'block' }} title="Email Preview" /></div>
+                  ? <div style={{ border: '1px solid #333', borderRadius: 8, overflow: 'hidden', background: '#fff' }}><iframe srcDoc={result.email_html} style={{ width: '100%', minHeight: 600, border: 'none', display: 'block' }} title="Email Preview" /></div>
                   : <textarea readOnly value={result.email_html} style={{ width: '100%', height: 280, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 8, color: '#7dd3fc', fontSize: 11, fontFamily: 'monospace', padding: 14, resize: 'vertical', outline: 'none', lineHeight: 1.5 }} />
                 }
               </div>
@@ -242,7 +253,7 @@ export default function App() {
                   <textarea
                     value={revisionText}
                     onChange={e => setRevisionText(e.target.value)}
-                    placeholder="e.g. Make the intro shorter. Change the CTA to Register Now. Try a different subject line."
+                    placeholder="e.g. Shorten the intro. Change the CTA button text. Try a punchier subject line."
                     style={{ flex: 1, background: '#0d0d0d', color: '#e2e8f0', border: `1.5px solid ${revisionText ? LIME : '#333'}`, borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', resize: 'none', height: 68, lineHeight: 1.5, fontFamily: 'DM Sans, sans-serif' }}
                     onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleRevise() }}
                   />
@@ -254,12 +265,12 @@ export default function App() {
                     {revising ? 'Revising...' : 'Apply Revisions'}
                   </button>
                 </div>
-                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>Cmd+Enter to apply. You can also ask to try a different subject line.</p>
+                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>Cmd+Enter to apply.</p>
               </div>
 
               <div style={{ borderTop: '1px solid #222', padding: '12px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <p style={{ fontSize: 11, color: '#444' }}>New camp week? Update inputs above and regenerate.</p>
-                <button onClick={handleGenerate} disabled={generating} style={{ background: 'transparent', border: `1px solid ${LIME}`, color: LIME, borderRadius: 6, padding: '7px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                <button onClick={handleGenerate} disabled={busy} style={{ background: 'transparent', border: `1px solid ${LIME}`, color: LIME, borderRadius: 6, padding: '7px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                   Regenerate
                 </button>
               </div>
