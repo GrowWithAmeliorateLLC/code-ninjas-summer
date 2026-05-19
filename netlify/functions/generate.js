@@ -1,6 +1,5 @@
 const SPACE_ID = '901313618762'
 const CU_BASE = 'https://api.clickup.com/api/v2'
-const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
 const URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
 const DEFAULT_SUBJECT = '\u{1F440} Summer Camps Starting Soon'
 
@@ -154,7 +153,7 @@ async function cuFetch(path, token) {
   return res.json()
 }
 
-function getField(task, fieldId) {
+function getCustomField(task, fieldId) {
   const field = task.custom_fields?.find(f => f.id === fieldId)
   if (!field) return ''
   const val = field.value
@@ -163,7 +162,7 @@ function getField(task, fieldId) {
   if (Array.isArray(val?.ops)) {
     return val.ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('').trim()
   }
-  if (typeof val === 'object') return JSON.stringify(val)
+  if (typeof val === 'object') return ''
   return String(val)
 }
 
@@ -270,18 +269,25 @@ export default async (req) => {
     const campDetails = await Promise.all(tasks.map(async (task) => {
       try {
         const detail = await getTaskDetail(task.id, CU_TOKEN)
-        const bookingUrl = getField(detail, URL_FIELD_ID)
-        const description = getField(detail, CONTENT_FIELD_ID)
+
+        // Booking URL from custom field
+        const bookingUrl = getCustomField(detail, URL_FIELD_ID)
+
+        // Description: ClickUp's built-in Content/Description field
+        // text_content = plain text version; description = may include markdown
+        const description = (detail.text_content || detail.description || '').trim()
+
         const rawName = task.name
         const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
         const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
         const cleanName = rawName.replace(/\s*\([\d\-\+]+\)\s*/g, '').replace(/\s*\|.*$/, '').trim()
         const fullDay = /full.?day/i.test(rawName)
+
         return {
           id: task.id, name: cleanName, ages, fullDay,
           dates: task.due_date ? formatDateRange(parseInt(task.due_date)) : '',
           booking_url: bookingUrl,
-          description: description || '',
+          description,
         }
       } catch {
         const rawName = task.name
