@@ -1,6 +1,7 @@
 const SPACE_ID = '901313618762'
 const CU_BASE = 'https://api.clickup.com/api/v2'
 const URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
+const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
 const DEFAULT_SUBJECT = '\u{1F440} Summer Camps Starting Soon'
 
 function getCampColor(name) {
@@ -153,17 +154,15 @@ async function cuFetch(path, token) {
   return res.json()
 }
 
-function getCustomField(task, fieldId) {
-  const field = task.custom_fields?.find(f => f.id === fieldId)
+function extractCustomFieldText(field) {
   if (!field) return ''
   const val = field.value
   if (!val) return ''
-  if (typeof val === 'string') return val
+  if (typeof val === 'string') return val.trim()
   if (Array.isArray(val?.ops)) {
     return val.ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('').trim()
   }
-  if (typeof val === 'object') return ''
-  return String(val)
+  return ''
 }
 
 async function findListByName(name, token) {
@@ -185,6 +184,54 @@ async function getCampsForWeek(listId, startDate, token) {
 
 async function getTaskDetail(taskId, token) {
   return cuFetch(`/task/${taskId}`, token)
+}
+
+function resolveDescription(detail, taskName) {
+  // 1. Built-in task description (plain text version)
+  const textContent = (detail.text_content || '').trim()
+  if (textContent) {
+    console.log(`[${taskName}] description source: text_content (${textContent.length} chars)`)
+    return textContent
+  }
+
+  // 2. Built-in task description (may include HTML/markdown)
+  const description = (detail.description || '').trim()
+  if (description) {
+    console.log(`[${taskName}] description source: description (${description.length} chars)`)
+    return description
+  }
+
+  // 3. Known CONTENT custom field ID
+  const byId = detail.custom_fields?.find(f => f.id === CONTENT_FIELD_ID)
+  const byIdText = extractCustomFieldText(byId)
+  if (byIdText) {
+    console.log(`[${taskName}] description source: custom field by ID (${byIdText.length} chars)`)
+    return byIdText
+  }
+
+  // 4. Any custom field named "content" or "description"
+  const byName = detail.custom_fields?.find(f =>
+    f.name?.toLowerCase() === 'content' || f.name?.toLowerCase() === 'description'
+  )
+  const byNameText = extractCustomFieldText(byName)
+  if (byNameText) {
+    console.log(`[${taskName}] description source: custom field "${byName.name}" (${byNameText.length} chars)`)
+    return byNameText
+  }
+
+  // Log what we DID find so we can diagnose
+  console.log(`[${taskName}] NO description found. Available fields:`, {
+    text_content: detail.text_content ?? 'null',
+    description: detail.description ?? 'null',
+    custom_fields: detail.custom_fields?.map(f => ({
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      value: JSON.stringify(f.value)?.slice(0, 80) ?? 'null'
+    }))
+  })
+
+  return ''
 }
 
 async function callClaude(messages, maxTokens = 1400) {
@@ -269,19 +316,13 @@ export default async (req) => {
     const campDetails = await Promise.all(tasks.map(async (task) => {
       try {
         const detail = await getTaskDetail(task.id, CU_TOKEN)
-
-        // Booking URL from custom field
-        const bookingUrl = getCustomField(detail, URL_FIELD_ID)
-
-        // Description: ClickUp's built-in Content/Description field
-        // text_content = plain text version; description = may include markdown
-        const description = (detail.text_content || detail.description || '').trim()
-
+        const bookingUrl = extractCustomFieldText(detail.custom_fields?.find(f => f.id === URL_FIELD_ID))
         const rawName = task.name
         const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
         const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
         const cleanName = rawName.replace(/\s*\([\d\-\+]+\)\s*/g, '').replace(/\s*\|.*$/, '').trim()
         const fullDay = /full.?day/i.test(rawName)
+        const description = resolveDescription(detail, cleanName)
 
         return {
           id: task.id, name: cleanName, ages, fullDay,
@@ -289,7 +330,8 @@ export default async (req) => {
           booking_url: bookingUrl,
           description,
         }
-      } catch {
+      } catch (err) {
+        console.error(`Error fetching task ${task.id}:`, err.message)
         const rawName = task.name
         const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
         const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
