@@ -47,8 +47,6 @@ function formatDateRange(dueDateMs) {
   return `${startStr}\u2013${endStr}, ${end.getFullYear()}`
 }
 
-// Read a plain-text value from a ClickUp custom field object.
-// Handles string values and Quill delta (ops) format.
 function readFieldValue(fieldObj) {
   if (!fieldObj) return ''
   const v = fieldObj.value
@@ -60,7 +58,6 @@ function readFieldValue(fieldObj) {
   return ''
 }
 
-// Look up a custom field by its ID and return its text value.
 function getFieldById(customFields, fieldId) {
   const field = (customFields || []).find(f => f.id === fieldId)
   return readFieldValue(field)
@@ -198,9 +195,18 @@ async function getTaskDetail(taskId, token) {
 async function callClaude(messages, maxTokens = 1400) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
     body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: maxTokens, messages })
   })
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('Claude API error:', res.status, err.slice(0, 200))
+    return ''
+  }
   const data = await res.json()
   return data.content?.[0]?.text || ''
 }
@@ -232,7 +238,7 @@ The camps array MUST have exactly ${camps.length} entries in the same order as t
   try {
     return JSON.parse(raw.replace(/```json|```/g, '').trim())
   } catch {
-    console.error('Claude JSON parse failed:', raw.slice(0, 300))
+    console.error('Claude JSON parse failed. Raw response:', raw.slice(0, 300))
     return { subject_line: DEFAULT_SUBJECT, intro: '', camps: camps.map(() => ({ snippet: '' })) }
   }
 }
@@ -284,12 +290,9 @@ export default async (req) => {
       try {
         const detail = await getTaskDetail(task.id, CU_TOKEN)
         const cf = detail.custom_fields || []
-
         const description = getFieldById(cf, CONTENT_FIELD_ID)
         const bookingUrl = getFieldById(cf, URL_FIELD_ID)
-
-        console.log(`[${cleanName}] description="${description.slice(0, 60)}" bookingUrl="${bookingUrl.slice(0, 60)}"`)
-
+        console.log(`[${cleanName}] desc=${description.length}chars booking=${bookingUrl.slice(0,40)}`)
         return {
           id: task.id, name: cleanName, ages, fullDay,
           dates: task.due_date ? formatDateRange(parseInt(task.due_date)) : '',
@@ -331,9 +334,7 @@ export default async (req) => {
       location, week_label,
       camps: camps.map(c => ({ name: c.name })),
       listId,
-      schedule_url: resolvedScheduleUrl,
-      // Debug: include descriptions so we can verify they're being read
-      _debug_descriptions: campDetails.map(c => ({ name: c.name, description_chars: c.description.length }))
+      schedule_url: resolvedScheduleUrl
     })
 
   } catch (err) {
