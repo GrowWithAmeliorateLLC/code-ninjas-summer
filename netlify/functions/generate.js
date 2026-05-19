@@ -1,7 +1,8 @@
 const SPACE_ID = '901313618762'
 const CU_BASE = 'https://api.clickup.com/api/v2'
-const URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
-const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
+// Custom field IDs (confirmed from ClickUp list schema)
+const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447' // "Content" text field – camp description
+const URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'     // "Text" text field – booking URL
 const DEFAULT_SUBJECT = '\u{1F440} Summer Camps Starting Soon'
 
 function getCampColor(name) {
@@ -44,6 +45,25 @@ function formatDateRange(dueDateMs) {
   const crossMonth = end.getMonth() !== start.getMonth()
   const endStr = crossMonth ? end.toLocaleDateString('en-US', opts) : String(end.getDate())
   return `${startStr}\u2013${endStr}, ${end.getFullYear()}`
+}
+
+// Read a plain-text value from a ClickUp custom field object.
+// Handles string values and Quill delta (ops) format.
+function readFieldValue(fieldObj) {
+  if (!fieldObj) return ''
+  const v = fieldObj.value
+  if (!v && v !== 0) return ''
+  if (typeof v === 'string') return v.trim()
+  if (typeof v === 'object' && Array.isArray(v.ops)) {
+    return v.ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('').trim()
+  }
+  return ''
+}
+
+// Look up a custom field by its ID and return its text value.
+function getFieldById(customFields, fieldId) {
+  const field = (customFields || []).find(f => f.id === fieldId)
+  return readFieldValue(field)
 }
 
 function buildCampCard(camp) {
@@ -154,17 +174,6 @@ async function cuFetch(path, token) {
   return res.json()
 }
 
-function extractCustomFieldText(field) {
-  if (!field) return ''
-  const val = field.value
-  if (!val) return ''
-  if (typeof val === 'string') return val.trim()
-  if (Array.isArray(val?.ops)) {
-    return val.ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('').trim()
-  }
-  return ''
-}
-
 async function findListByName(name, token) {
   const data = await cuFetch(`/space/${SPACE_ID}/list?archived=false`, token)
   const list = (data.lists || []).find(l => l.name.toLowerCase() === name.toLowerCase())
@@ -186,54 +195,6 @@ async function getTaskDetail(taskId, token) {
   return cuFetch(`/task/${taskId}`, token)
 }
 
-function resolveDescription(detail, taskName) {
-  // 1. Built-in task description (plain text version)
-  const textContent = (detail.text_content || '').trim()
-  if (textContent) {
-    console.log(`[${taskName}] description source: text_content (${textContent.length} chars)`)
-    return textContent
-  }
-
-  // 2. Built-in task description (may include HTML/markdown)
-  const description = (detail.description || '').trim()
-  if (description) {
-    console.log(`[${taskName}] description source: description (${description.length} chars)`)
-    return description
-  }
-
-  // 3. Known CONTENT custom field ID
-  const byId = detail.custom_fields?.find(f => f.id === CONTENT_FIELD_ID)
-  const byIdText = extractCustomFieldText(byId)
-  if (byIdText) {
-    console.log(`[${taskName}] description source: custom field by ID (${byIdText.length} chars)`)
-    return byIdText
-  }
-
-  // 4. Any custom field named "content" or "description"
-  const byName = detail.custom_fields?.find(f =>
-    f.name?.toLowerCase() === 'content' || f.name?.toLowerCase() === 'description'
-  )
-  const byNameText = extractCustomFieldText(byName)
-  if (byNameText) {
-    console.log(`[${taskName}] description source: custom field "${byName.name}" (${byNameText.length} chars)`)
-    return byNameText
-  }
-
-  // Log what we DID find so we can diagnose
-  console.log(`[${taskName}] NO description found. Available fields:`, {
-    text_content: detail.text_content ?? 'null',
-    description: detail.description ?? 'null',
-    custom_fields: detail.custom_fields?.map(f => ({
-      id: f.id,
-      name: f.name,
-      type: f.type,
-      value: JSON.stringify(f.value)?.slice(0, 80) ?? 'null'
-    }))
-  })
-
-  return ''
-}
-
 async function callClaude(messages, maxTokens = 1400) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -246,12 +207,12 @@ async function callClaude(messages, maxTokens = 1400) {
 
 async function generateSnippets(camps, location, weekLabel) {
   const campList = camps.map((c, i) =>
-    `${i + 1}. ${c.name}${c.ages ? ` (${c.ages})` : ''}${c.description ? `\nDescription: ${c.description.slice(0, 400)}` : ''}`
+    `${i + 1}. ${c.name}${c.ages ? ` (${c.ages})` : ''}${c.description ? `\nDescription: ${c.description.slice(0, 500)}` : ''}`
   ).join('\n\n')
 
   const prompt = `You are writing copy for a Code Ninjas ${location} summer camp email for the week of ${weekLabel}.
 
-Below is a numbered list of camps. You MUST return one snippet per camp, in the SAME ORDER and COUNT as the input list. Even if no description is provided, write a compelling 1-2 sentence snippet based on the camp name alone \u2014 mention what kids will build, create, or explore.
+Below is a numbered list of camps. You MUST return one snippet per camp, in the SAME ORDER and COUNT as the input list. When a Description is provided, base the snippet on it. When no description is provided, write a compelling 1-2 sentence snippet from the camp name alone.
 
 Camps:
 ${campList}
@@ -261,7 +222,7 @@ Return ONLY valid JSON with no markdown fences:
   "subject_line": "Engaging 6-10 word subject line with a relevant emoji. No day names.",
   "intro": "1-2 sentence email intro that mentions ${location} and gets parents excited. No day names, no AM/PM.",
   "camps": [
-    { "snippet": "1-2 sentences. Active voice. Mention specific tools or projects kids will use (MCreator, Scratch, LEGO SPIKE, Blockbench, Python, etc.) when the camp name suggests them. Never mention times or day names. Never leave this empty." }
+    { "snippet": "1-2 sentences. Active voice. Specific to this camp. Never mention times or day names. Never leave this empty." }
   ]
 }
 
@@ -314,15 +275,20 @@ export default async (req) => {
     }
 
     const campDetails = await Promise.all(tasks.map(async (task) => {
+      const rawName = task.name
+      const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
+      const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
+      const cleanName = rawName.replace(/\s*\([\d\-\+]+\)\s*/g, '').replace(/\s*\|.*$/, '').trim()
+      const fullDay = /full.?day/i.test(rawName)
+
       try {
         const detail = await getTaskDetail(task.id, CU_TOKEN)
-        const bookingUrl = extractCustomFieldText(detail.custom_fields?.find(f => f.id === URL_FIELD_ID))
-        const rawName = task.name
-        const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
-        const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
-        const cleanName = rawName.replace(/\s*\([\d\-\+]+\)\s*/g, '').replace(/\s*\|.*$/, '').trim()
-        const fullDay = /full.?day/i.test(rawName)
-        const description = resolveDescription(detail, cleanName)
+        const cf = detail.custom_fields || []
+
+        const description = getFieldById(cf, CONTENT_FIELD_ID)
+        const bookingUrl = getFieldById(cf, URL_FIELD_ID)
+
+        console.log(`[${cleanName}] description="${description.slice(0, 60)}" bookingUrl="${bookingUrl.slice(0, 60)}"`)
 
         return {
           id: task.id, name: cleanName, ages, fullDay,
@@ -331,11 +297,7 @@ export default async (req) => {
           description,
         }
       } catch (err) {
-        console.error(`Error fetching task ${task.id}:`, err.message)
-        const rawName = task.name
-        const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
-        const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
-        const cleanName = rawName.replace(/\s*\([\d\-\+]+\)\s*/g, '').replace(/\s*\|.*$/, '').trim()
+        console.error(`[${cleanName}] task detail failed: ${err.message}`)
         return { id: task.id, name: cleanName, ages, fullDay: false, dates: '', booking_url: '', description: '' }
       }
     }))
@@ -369,7 +331,9 @@ export default async (req) => {
       location, week_label,
       camps: camps.map(c => ({ name: c.name })),
       listId,
-      schedule_url: resolvedScheduleUrl
+      schedule_url: resolvedScheduleUrl,
+      // Debug: include descriptions so we can verify they're being read
+      _debug_descriptions: campDetails.map(c => ({ name: c.name, description_chars: c.description.length }))
     })
 
   } catch (err) {
