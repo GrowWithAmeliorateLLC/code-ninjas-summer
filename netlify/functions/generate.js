@@ -3,6 +3,7 @@ const CU_BASE = 'https://api.clickup.com/api/v2'
 const CONTENT_FIELD_ID = '354e29f0-fa22-471c-a538-00028bd41447'
 const URL_FIELD_ID = '93af8cc2-fa4a-4b54-b482-8451264eb4a2'
 const DEFAULT_SUBJECT = '\u{1F440} Summer Camps Starting Soon'
+const CN_FALLBACK_URL = 'https://www.codeninjas.com'
 
 function getCampColor(name) {
   const n = name.toLowerCase()
@@ -86,6 +87,7 @@ function buildCampCard(camp) {
 }
 
 function buildEmailHtml({ location, week_label, imageUrl, camps, schedule_url, intro, subject_line }) {
+  const ctaHref = schedule_url || CN_FALLBACK_URL
   const heroBlock = imageUrl ? `
         <tr>
           <td style="padding:0;line-height:0;">
@@ -96,7 +98,6 @@ function buildEmailHtml({ location, week_label, imageUrl, camps, schedule_url, i
   const introHtml = intro
     ? `\n        <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;text-align:center;"><p style="font-family:Arial,Helvetica,sans-serif;margin:0;font-size:15px;color:#444444;line-height:1.7;">${intro}</p></td></tr>`
     : ''
-  const ctaHref = schedule_url || 'https://www.codeninjas.com'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -160,7 +161,6 @@ function getField(task, fieldId) {
   const val = field.value
   if (!val) return ''
   if (typeof val === 'string') return val
-  // Rich text (Quill) format: extract plain text from ops
   if (Array.isArray(val?.ops)) {
     return val.ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('').trim()
   }
@@ -224,8 +224,7 @@ The camps array MUST have exactly ${camps.length} entries in the same order as t
 
   const raw = await callClaude([{ role: 'user', content: prompt }])
   try {
-    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim())
-    return parsed
+    return JSON.parse(raw.replace(/```json|```/g, '').trim())
   } catch {
     console.error('Claude JSON parse failed:', raw.slice(0, 300))
     return { subject_line: DEFAULT_SUBJECT, intro: '', camps: camps.map(() => ({ snippet: '' })) }
@@ -237,7 +236,7 @@ async function reviseEmail(currentHtml, instructions, preservedData) {
 
 Instructions: ${instructions}
 
-Rules: never use day names in dates, never use AM/PM, keep all booking URLs unchanged.
+Rules: never use day names in dates, never use AM/PM, keep all booking URLs unchanged, keep the "View All Camps & Register" button URL unchanged.
 
 Return ONLY the complete updated HTML, no explanation.
 
@@ -250,7 +249,7 @@ ${currentHtml}`
 export default async (req) => {
   try {
     const body = await req.json()
-    const { listName, startDate, imageUrl, revisionInstructions, currentEmailHtml, preservedData } = body
+    const { listName, startDate, imageUrl, scheduleUrl, revisionInstructions, currentEmailHtml, preservedData } = body
     const CU_TOKEN = process.env.CLICKUP_API_KEY
 
     if (revisionInstructions && currentEmailHtml) {
@@ -299,7 +298,6 @@ export default async (req) => {
     const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 4)
     const week_label = `Camps ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}\u2013${weekEnd.getDate()}, ${weekEnd.getFullYear()}`
 
-    // Generate snippets — results are ORDER-MATCHED to campDetails by index
     const aiContent = await generateSnippets(campDetails, location, week_label)
 
     const camps = campDetails.map((camp, i) => ({
@@ -307,11 +305,13 @@ export default async (req) => {
       snippet: aiContent.camps?.[i]?.snippet || ''
     }))
 
+    const schedule_url = scheduleUrl || CN_FALLBACK_URL
+
     const email_html = buildEmailHtml({
       location, week_label,
       imageUrl: imageUrl || null,
       camps,
-      schedule_url: 'https://www.codeninjas.com',
+      schedule_url,
       intro: aiContent.intro || '',
       subject_line: aiContent.subject_line || DEFAULT_SUBJECT
     })
@@ -322,7 +322,7 @@ export default async (req) => {
       location, week_label,
       camps: camps.map(c => ({ name: c.name })),
       listId,
-      schedule_url: ''
+      schedule_url
     })
 
   } catch (err) {

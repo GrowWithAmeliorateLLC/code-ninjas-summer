@@ -36,6 +36,7 @@ export default function App() {
   const [listName, setListName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [imageUrl, setImageUrl] = useState('')
+  const [scheduleUrl, setScheduleUrl] = useState('')
   const [generating, setGenerating] = useState(false)
   const [revising, setRevising] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -56,7 +57,12 @@ export default function App() {
     try {
       const res = await fetch('/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listName: listName.trim(), startDate, imageUrl: imageUrl.trim() || null })
+        body: JSON.stringify({
+          listName: listName.trim(),
+          startDate,
+          imageUrl: imageUrl.trim() || null,
+          scheduleUrl: scheduleUrl.trim() || null
+        })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
@@ -75,9 +81,17 @@ export default function App() {
           listName: listName.trim(),
           startDate,
           imageUrl: imageUrl.trim() || null,
+          scheduleUrl: scheduleUrl.trim() || result.schedule_url || null,
           revisionInstructions: revisionText.trim(),
           currentEmailHtml: result.email_html,
-          preservedData: { location: result.location, week_label: result.week_label, camps: result.camps, listId: result.listId, schedule_url: result.schedule_url, subject_line: result.subject_line }
+          preservedData: {
+            location: result.location,
+            week_label: result.week_label,
+            camps: result.camps,
+            listId: result.listId,
+            schedule_url: scheduleUrl.trim() || result.schedule_url || '',
+            subject_line: result.subject_line
+          }
         })
       })
       const data = await res.json()
@@ -148,17 +162,31 @@ export default function App() {
               </button>
             </div>
 
-            <div>
-              <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>
-                Hero Image URL <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
-              </label>
-              <input
-                type="text"
-                placeholder="https://storage.googleapis.com/codeninjas-social-content/references/..."
-                value={imageUrl}
-                onChange={e => setImageUrl(e.target.value)}
-                style={{ width: '100%', background: '#0d0d0d', color: '#fff', border: `1.5px solid ${imageUrl ? LIME : '#333'}`, borderRadius: 8, padding: '11px 14px', fontSize: 13, outline: 'none', fontFamily: 'monospace' }}
-              />
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 0 }}>
+              <div style={{ flex: '1 1 260px' }}>
+                <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>
+                  Hero Image URL <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://storage.googleapis.com/..."
+                  value={imageUrl}
+                  onChange={e => setImageUrl(e.target.value)}
+                  style={{ width: '100%', background: '#0d0d0d', color: '#fff', border: `1.5px solid ${imageUrl ? LIME : '#333'}`, borderRadius: 8, padding: '11px 14px', fontSize: 13, outline: 'none', fontFamily: 'monospace' }}
+                />
+              </div>
+              <div style={{ flex: '1 1 260px' }}>
+                <label style={{ display: 'block', fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 7 }}>
+                  Camps Page URL <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://www.codeninjas.com/tx-draper/camps"
+                  value={scheduleUrl}
+                  onChange={e => setScheduleUrl(e.target.value)}
+                  style={{ width: '100%', background: '#0d0d0d', color: '#fff', border: `1.5px solid ${scheduleUrl ? LIME : '#333'}`, borderRadius: 8, padding: '11px 14px', fontSize: 13, outline: 'none', fontFamily: 'monospace' }}
+                />
+              </div>
             </div>
 
             {error && (
@@ -182,7 +210,7 @@ export default function App() {
               <p style={{ fontSize: 16, color: '#fff', fontWeight: 700, marginBottom: 6 }}>Ready to generate</p>
               <p style={{ fontSize: 13, color: '#555', lineHeight: 1.7 }}>
                 Enter a ClickUp list name and the start of the camp week.<br />
-                Add an optional hero image URL, then hit Generate.
+                Add an optional hero image or camps page URL, then hit Generate.
               </p>
             </div>
           )}
