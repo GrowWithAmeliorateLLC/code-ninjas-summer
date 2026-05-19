@@ -213,7 +213,7 @@ export default async (req) => {
   try {
     const body = await req.json()
     const { listName, startDate, imageUrl, revisionInstructions, currentEmailHtml, preservedData } = body
-    const CU_TOKEN = process.env.CLICKUP_API_TOKEN
+    const CU_TOKEN = process.env.CLICKUP_API_KEY
 
     if (revisionInstructions && currentEmailHtml) {
       const revised = await reviseEmail(currentEmailHtml, revisionInstructions, preservedData)
