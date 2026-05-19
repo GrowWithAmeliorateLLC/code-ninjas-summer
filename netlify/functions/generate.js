@@ -155,7 +155,17 @@ async function cuFetch(path, token) {
 }
 
 function getField(task, fieldId) {
-  return task.custom_fields?.find(f => f.id === fieldId)?.value || ''
+  const field = task.custom_fields?.find(f => f.id === fieldId)
+  if (!field) return ''
+  const val = field.value
+  if (!val) return ''
+  if (typeof val === 'string') return val
+  // Rich text (Quill) format: extract plain text from ops
+  if (Array.isArray(val?.ops)) {
+    return val.ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('').trim()
+  }
+  if (typeof val === 'object') return JSON.stringify(val)
+  return String(val)
 }
 
 async function findListByName(name, token) {
@@ -193,17 +203,45 @@ async function generateSnippets(camps, location, weekLabel) {
   const campList = camps.map((c, i) =>
     `${i + 1}. ${c.name}${c.ages ? ` (${c.ages})` : ''}${c.description ? `\nDescription: ${c.description.slice(0, 400)}` : ''}`
   ).join('\n\n')
-  const prompt = `You are writing copy for a Code Ninjas ${location} summer camp email for ${weekLabel}.\n\nCamps:\n${campList}\n\nReturn ONLY valid JSON, no markdown:\n{\n  "subject_line": "6-10 word subject line with a relevant emoji. No day names.",\n  "intro": "1-2 sentence email intro mentioning ${location}. No day names, no AM/PM.",\n  "camps": [\n    { "name": "exact name from input", "snippet": "1-2 sentences. Mention specific tools or projects. Active voice. No times, no day names." }\n  ]\n}\n\nSnippet rules: action-oriented, mention real tools (MCreator, Scratch, LEGO SPIKE, Blockbench, etc.) when available, 1-2 sentences max, never mention times or day names.`
+
+  const prompt = `You are writing copy for a Code Ninjas ${location} summer camp email for the week of ${weekLabel}.
+
+Below is a numbered list of camps. You MUST return one snippet per camp, in the SAME ORDER and COUNT as the input list. Even if no description is provided, write a compelling 1-2 sentence snippet based on the camp name alone — mention what kids will build, create, or explore.
+
+Camps:
+${campList}
+
+Return ONLY valid JSON with no markdown fences:
+{
+  "subject_line": "Engaging 6-10 word subject line with a relevant emoji. No day names.",
+  "intro": "1-2 sentence email intro that mentions ${location} and gets parents excited. No day names, no AM/PM.",
+  "camps": [
+    { "snippet": "1-2 sentences. Active voice. Mention specific tools or projects kids will use (MCreator, Scratch, LEGO SPIKE, Blockbench, Python, etc.) when the camp name suggests them. Never mention times or day names. Never leave this empty." }
+  ]
+}
+
+The camps array MUST have exactly ${camps.length} entries in the same order as the input.`
+
   const raw = await callClaude([{ role: 'user', content: prompt }])
   try {
-    return JSON.parse(raw.replace(/```json|```/g, '').trim())
+    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim())
+    return parsed
   } catch {
-    return { subject_line: DEFAULT_SUBJECT, intro: '', camps: camps.map(c => ({ name: c.name, snippet: '' })) }
+    console.error('Claude JSON parse failed:', raw.slice(0, 300))
+    return { subject_line: DEFAULT_SUBJECT, intro: '', camps: camps.map(() => ({ snippet: '' })) }
   }
 }
 
 async function reviseEmail(currentHtml, instructions, preservedData) {
-  const prompt = `Edit this HTML email for Code Ninjas ${preservedData?.location || ''}.\n\nInstructions: ${instructions}\n\nRules: never use day names in dates, never use AM/PM, keep all booking URLs unchanged.\n\nReturn ONLY the complete updated HTML, no explanation.\n\n${currentHtml}`
+  const prompt = `Edit this HTML email for Code Ninjas ${preservedData?.location || ''}.
+
+Instructions: ${instructions}
+
+Rules: never use day names in dates, never use AM/PM, keep all booking URLs unchanged.
+
+Return ONLY the complete updated HTML, no explanation.
+
+${currentHtml}`
   const raw = await callClaude([{ role: 'user', content: prompt }], 8000)
   const html = raw.replace(/^```html\n?|^```\n?|```$/gm, '').trim()
   return { email_html: html, subject_line: preservedData?.subject_line }
@@ -243,13 +281,16 @@ export default async (req) => {
         const fullDay = /full.?day/i.test(rawName)
         return {
           id: task.id, name: cleanName, ages, fullDay,
-          dates: formatDateRange(parseInt(task.due_date)),
+          dates: task.due_date ? formatDateRange(parseInt(task.due_date)) : '',
           booking_url: bookingUrl,
-          description: description?.slice(0, 500) || '',
-          display_label: ''
+          description: description || '',
         }
       } catch {
-        return { id: task.id, name: task.name, ages: '', fullDay: false, dates: '', booking_url: '', description: '', display_label: '' }
+        const rawName = task.name
+        const agesMatch = rawName.match(/\((\d[\d\-\+]*)\)/)
+        const ages = agesMatch ? `Ages ${agesMatch[1]}` : ''
+        const cleanName = rawName.replace(/\s*\([\d\-\+]+\)\s*/g, '').replace(/\s*\|.*$/, '').trim()
+        return { id: task.id, name: cleanName, ages, fullDay: false, dates: '', booking_url: '', description: '' }
       }
     }))
 
@@ -258,14 +299,13 @@ export default async (req) => {
     const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 4)
     const week_label = `Camps ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}\u2013${weekEnd.getDate()}, ${weekEnd.getFullYear()}`
 
+    // Generate snippets — results are ORDER-MATCHED to campDetails by index
     const aiContent = await generateSnippets(campDetails, location, week_label)
 
-    const camps = campDetails.map(camp => {
-      const aiCamp = aiContent.camps?.find(c =>
-        c.name.toLowerCase().includes(camp.name.toLowerCase().slice(0, 10))
-      )
-      return { ...camp, snippet: aiCamp?.snippet || '' }
-    })
+    const camps = campDetails.map((camp, i) => ({
+      ...camp,
+      snippet: aiContent.camps?.[i]?.snippet || ''
+    }))
 
     const email_html = buildEmailHtml({
       location, week_label,
