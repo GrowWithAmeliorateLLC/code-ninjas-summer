@@ -63,6 +63,73 @@ function getFieldById(customFields, fieldId) {
   return readFieldValue(field)
 }
 
+function extractUrl(text) {
+  const m = (text || '').match(/https?:\/\/[^\s<>"'\n]+/)
+  return m ? m[0].trim() : null
+}
+
+// Find the master "View All Camps" link for the location (prefer a MyStudio task).
+function findScheduleUrl(tasks) {
+  for (const task of (tasks || [])) {
+    const name = (task.name || '').toLowerCase()
+    if (name.includes('mystudio') || name.includes('my studio')) {
+      const u = extractUrl(task.description || task.text_content || '')
+      if (u) return u
+      for (const f of (task.custom_fields || [])) {
+        const u2 = extractUrl(readFieldValue(f))
+        if (u2) return u2
+      }
+    }
+  }
+  for (const task of (tasks || [])) {
+    const booking = getFieldById(task.custom_fields, URL_FIELD_ID)
+    if (booking) continue // skip camp tasks (their link is a per-camp booking URL)
+    const u = extractUrl(task.description || task.text_content || '')
+    if (u && (u.includes('mystudio') || u.includes('members.codeninjas') || u.includes('bit.ly'))) return u
+  }
+  return null
+}
+
+// --- Roundup SMS (deterministic, rule-compliant) ---
+// Date-anchored (no "camp week"), paid-camp CTA, master link, avoids
+// unlock/unleash/ninja (camp names pass through as proper nouns).
+function cleanCampName(name) {
+  return (name || '')
+    .replace(/\s*[~\u2013-]\s*[A-Z][a-z]+\.?\s*\d.*$/i, '') // strip "~ June 22nd - 26th" date suffixes
+    .replace(/\s*~.*$/, '')                                 // any remaining "~ ..." tail
+    .replace(/\s*\([^)]*\)\s*/g, ' ')                       // strip "(Full Day)" / "(8-14)"
+    .replace(/\bFULL DAY\b/gi, '')
+    .replace(/\s*\|.*$/, '')                                // strip "| ..." tail
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function smsDateRange(startDate) {
+  const start = new Date(startDate + 'T12:00:00Z')
+  const end = new Date(start.getTime() + 4 * 24 * 60 * 60 * 1000)
+  const month = d => d.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
+  const day = d => d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' })
+  return start.getUTCMonth() === end.getUTCMonth()
+    ? `${month(start)} ${day(start)}-${day(end)}`
+    : `${month(start)} ${day(start)}-${month(end)} ${day(end)}`
+}
+
+function buildRoundupSms({ location, camps, scheduleUrl, startDate }) {
+  const names = (camps || []).map(c => cleanCampName(c.name)).filter(Boolean)
+  const n = names.length
+  if (n === 0) return ''
+  const dateRange = smsDateRange(startDate)
+  let lineup
+  if (n === 1) lineup = names[0]
+  else if (n === 2) lineup = `${names[0]} and ${names[1]}`
+  else lineup = `From ${names.slice(0, -1).join(', ')} to ${names[n - 1]}`
+  const campWord = n === 1 ? 'camp' : 'camps'
+  const cta = scheduleUrl
+    ? `Spots fill fast \u2014 see the full schedule & sign up: ${scheduleUrl}`
+    : 'Spots fill fast \u2014 sign up today!'
+  return `Code Ninjas ${location}: ${n} hands-on ${campWord}, ${dateRange}! ${lineup}. ${cta}`
+}
+
 function buildCampCard(camp) {
   const c = getCampColor(camp.name)
   const isJR = /\bjr[\s:.]/u.test(camp.name.toLowerCase()) || camp.name.toLowerCase().startsWith('jr ')
@@ -185,7 +252,9 @@ async function getCampsForWeek(listId, startDate, token) {
     `/list/${listId}/task?due_date_gt=${start.getTime()}&due_date_lt=${end.getTime()}&archived=false&subtasks=false`,
     token
   )
-  return (data.tasks || []).filter(t => !/^CAMP(S)?\s/i.test(t.name.trim()))
+  // Exclude scaffolding tasks that are not camps: the "CAMPS WEEK OF..." parent
+  // and any standalone Email/SMS deliverable tasks (which carry dates too).
+  return (data.tasks || []).filter(t => !/^(CAMPS?\b|SMS\b|EMAIL\b)/i.test(t.name.trim()))
 }
 
 async function getTaskDetail(taskId, token) {
@@ -266,7 +335,8 @@ export default async (req) => {
 
     if (revisionInstructions && currentEmailHtml) {
       const revised = await reviseEmail(currentEmailHtml, revisionInstructions, preservedData)
-      return Response.json(revised)
+      // Preserve the SMS through email revisions.
+      return Response.json({ ...revised, sms_text: preservedData?.sms_text })
     }
 
     if (!listName || !startDate) {
@@ -328,13 +398,26 @@ export default async (req) => {
       subject_line: aiContent.subject_line || DEFAULT_SUBJECT
     })
 
+    // Build the Roundup SMS from the same camp data, in the same pass as the email.
+    let smsScheduleUrl = resolvedScheduleUrl
+    if (!smsScheduleUrl) {
+      try {
+        const allData = await cuFetch(`/list/${listId}/task?archived=false&subtasks=true&include_closed=true`, CU_TOKEN)
+        smsScheduleUrl = findScheduleUrl(allData.tasks || []) || ''
+      } catch (e) {
+        console.error('schedule url lookup failed:', e.message)
+      }
+    }
+    const sms_text = buildRoundupSms({ location, camps: campDetails, scheduleUrl: smsScheduleUrl, startDate })
+
     return Response.json({
       email_html,
       subject_line: aiContent.subject_line || DEFAULT_SUBJECT,
       location, week_label,
       camps: camps.map(c => ({ name: c.name })),
       listId,
-      schedule_url: resolvedScheduleUrl
+      schedule_url: resolvedScheduleUrl,
+      sms_text
     })
 
   } catch (err) {

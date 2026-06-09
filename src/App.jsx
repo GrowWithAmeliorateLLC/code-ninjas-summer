@@ -91,7 +91,8 @@ export default function App() {
             camps: result.camps,
             listId: result.listId,
             schedule_url: scheduleUrl.trim() || result.schedule_url || '',
-            subject_line: result.subject_line
+            subject_line: result.subject_line,
+            sms_text: smsText
           }
         })
       })
@@ -130,7 +131,7 @@ export default function App() {
           <img src="https://www.codeninjas.com/hubfs/Group%201.svg" alt="Code Ninjas" style={{ height: 32 }} />
           <div style={{ borderLeft: '1px solid #222', paddingLeft: 16 }}>
             <p style={{ fontSize: 10, color: LIME, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 2 }}>Ameliorate</p>
-            <p style={{ fontSize: 17, color: '#fff', fontWeight: 700 }}>Camp Email Generator</p>
+            <p style={{ fontSize: 17, color: '#fff', fontWeight: 700 }}>Camp Email &amp; SMS Generator</p>
           </div>
         </div>
 
