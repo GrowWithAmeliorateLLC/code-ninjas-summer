@@ -46,12 +46,13 @@ export default function App() {
   const [savedTasks, setSavedTasks] = useState(null)
   const [emailPreview, setEmailPreview] = useState(false)
   const [revisionText, setRevisionText] = useState('')
+  const [smsText, setSmsText] = useState('')
 
-  const genMessages = ['Fetching camps from ClickUp...', 'Reading camp details...', 'Writing snippets...', 'Building email...', 'Almost done...']
+  const genMessages = ['Fetching camps from ClickUp...', 'Reading camp details...', 'Writing snippets...', 'Building email...', 'Writing the SMS...', 'Almost done...']
 
   async function handleGenerate() {
     if (!listName.trim() || !startDate) { setError('Please enter a ClickUp list name and a start date.'); return }
-    setError(null); setResult(null); setSavedTasks(null); setRevisionText(''); setGenerating(true); setGenMsg(genMessages[0])
+    setError(null); setResult(null); setSavedTasks(null); setRevisionText(''); setSmsText(''); setGenerating(true); setGenMsg(genMessages[0])
     let mi = 0
     const interval = setInterval(() => { mi = (mi + 1) % genMessages.length; setGenMsg(genMessages[mi]) }, 3000)
     try {
@@ -66,7 +67,7 @@ export default function App() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
-      setResult(data); setEmailPreview(false)
+      setResult(data); setSmsText(data.sms_text || ''); setEmailPreview(false)
     } catch (err) { setError(err.message) }
     finally { clearInterval(interval); setGenerating(false) }
   }
@@ -109,7 +110,7 @@ export default function App() {
     try {
       const res = await fetch('/api/create-tasks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listName: listName.trim(), listId: result.listId, weekLabel: result.week_label, startDate, emailHtml: result.email_html, subjectLine: result.subject_line })
+        body: JSON.stringify({ listName: listName.trim(), listId: result.listId, weekLabel: result.week_label, startDate, emailHtml: result.email_html, subjectLine: result.subject_line, smsText })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save to ClickUp')
@@ -275,6 +276,23 @@ export default function App() {
                 }
               </div>
 
+              <div style={{ borderTop: '1px solid #2a2a2a', padding: '22px', background: '#101510' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <p style={{ fontSize: 11, color: LIME, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>Roundup SMS</p>
+                    <p style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Editable. Saves to the SMS task&rsquo;s Text field &mdash; due 3 days before camp, PRIORITY, assigned to Randi.</p>
+                  </div>
+                  <CopyBtn text={smsText} label="Copy SMS" />
+                </div>
+                <textarea
+                  value={smsText}
+                  onChange={e => setSmsText(e.target.value)}
+                  placeholder="The Roundup SMS will appear here after you generate."
+                  style={{ width: '100%', height: 110, background: '#0d0d0d', border: `1.5px solid ${smsText ? LIME : '#333'}`, borderRadius: 8, color: '#e2e8f0', fontSize: 13, fontFamily: 'DM Sans, sans-serif', padding: 14, resize: 'vertical', outline: 'none', lineHeight: 1.6 }}
+                />
+                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>{smsText.length} characters &middot; ~{Math.max(1, Math.ceil(smsText.length / 160))} SMS segment{Math.ceil(smsText.length / 160) !== 1 ? 's' : ''}</p>
+              </div>
+
               <div style={{ borderTop: '1px solid #2a2a2a', padding: '20px 22px', background: '#141414' }}>
                 <p style={{ fontSize: 11, color: '#555', fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 }}>Request Revisions</p>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
@@ -293,7 +311,7 @@ export default function App() {
                     {revising ? 'Revising...' : 'Apply Revisions'}
                   </button>
                 </div>
-                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>Cmd+Enter to apply.</p>
+                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>Cmd+Enter to apply. Revisions apply to the email; edit the SMS directly above.</p>
               </div>
 
               <div style={{ borderTop: '1px solid #222', padding: '12px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
