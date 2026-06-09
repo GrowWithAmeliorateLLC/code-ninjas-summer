@@ -60,6 +60,46 @@ function findScheduleUrl(tasks) {
   return null
 }
 
+// --- Roundup SMS (deterministic, rule-compliant) ---
+// Roundup style, date-anchored (no "camp week"), paid-camp CTA, master link,
+// avoids unlock/unleash/ninja (camp names pass through as proper nouns).
+function cleanCampName(name) {
+  return (name || '')
+    .replace(/\s*[~–-]\s*[A-Z][a-z]+\.?\s*\d.*$/i, '') // strip "~ June 22nd - 26th" style date suffixes
+    .replace(/\s*~.*$/, '')                            // any remaining "~ ..." tail
+    .replace(/\s*\([^)]*\)\s*/g, ' ')                  // strip "(Full Day)" etc.
+    .replace(/\bFULL DAY\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function formatDateRange(startDate) {
+  // Mon–Fri week derived from the camp start date
+  const start = new Date(startDate + 'T12:00:00Z')
+  const end = new Date(start.getTime() + 4 * 24 * 60 * 60 * 1000)
+  const month = d => d.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
+  const day = d => d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' })
+  return start.getUTCMonth() === end.getUTCMonth()
+    ? `${month(start)} ${day(start)}-${day(end)}`
+    : `${month(start)} ${day(start)}-${month(end)} ${day(end)}`
+}
+
+function buildRoundupSms({ location, camps, scheduleUrl, startDate }) {
+  const names = (camps || []).map(c => cleanCampName(c.name)).filter(Boolean)
+  const n = names.length
+  if (n === 0) return ''
+  const dateRange = formatDateRange(startDate)
+  let lineup
+  if (n === 1) lineup = names[0]
+  else if (n === 2) lineup = `${names[0]} and ${names[1]}`
+  else lineup = `From ${names.slice(0, -1).join(', ')} to ${names[n - 1]}`
+  const campWord = n === 1 ? 'camp' : 'camps'
+  const cta = scheduleUrl
+    ? `Spots fill fast — see the full schedule & sign up: ${scheduleUrl}`
+    : 'Spots fill fast — sign up today!'
+  return `Code Ninjas ${location}: ${n} hands-on ${campWord}, ${dateRange}! ${lineup}. ${cta}`
+}
+
 const EMAIL_SYSTEM_PROMPT = `You are a Code Ninjas marketing content specialist.
 
 Given camp data, produce an HTML email. Respond ONLY with valid JSON - no markdown fences, no extra text.
@@ -201,7 +241,11 @@ Generate the email HTML as JSON.`
     return Response.json({ error: `Failed to parse AI response${hint}. Raw start: ${clean.slice(0, 200)}` }, { status: 500 })
   }
 
-  return Response.json({ ...parsed, listId, schedule_url: scheduleUrl, subject_line: DEFAULT_SUBJECT })
+  // Build the Roundup SMS from the same camp data, in the same pass as the email.
+  const smsLocation = parsed.location || location
+  const smsText = buildRoundupSms({ location: smsLocation, camps, scheduleUrl, startDate })
+
+  return Response.json({ ...parsed, listId, schedule_url: scheduleUrl, subject_line: DEFAULT_SUBJECT, sms_text: smsText })
 }
 
 export const config = { path: '/api/generate' }
