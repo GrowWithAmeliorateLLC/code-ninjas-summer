@@ -11,6 +11,26 @@ const styles = `
   @keyframes spin { to { transform: rotate(360deg); } }
 `
 
+// POST helper that NEVER throws "Unexpected token '<'": it reads the raw body,
+// tries to parse JSON, and if the server returned an HTML error page it surfaces
+// a short readable message instead.
+async function postJson(url, payload) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  const text = await res.text()
+  let data = null
+  try { data = JSON.parse(text) } catch { data = null }
+  if (!data) {
+    const snippet = (text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)
+    throw new Error(`Server error ${res.status}${res.statusText ? ' ' + res.statusText : ''}. ${snippet || 'Empty response from the function.'}`)
+  }
+  if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
+  return data
+}
+
 function Spinner({ message }) {
   return (
     <div style={{ textAlign: 'center', padding: '48px 24px' }}>
@@ -38,6 +58,10 @@ function SavedPill({ label }) {
       <span style={{ fontSize: 13 }}>&#10003;</span>{label}
     </span>
   )
+}
+
+function SpinDot({ color }) {
+  return <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: color, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
 }
 
 export default function App() {
@@ -91,17 +115,12 @@ export default function App() {
     let mi = 0
     const interval = setInterval(() => { mi = (mi + 1) % genMessages.length; setGenMsg(genMessages[mi]) }, 3000)
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          listName: listName.trim(),
-          startDate,
-          imageUrl: imageUrl.trim() || null,
-          scheduleUrl: scheduleUrl.trim() || null
-        })
+      const data = await postJson('/api/generate', {
+        listName: listName.trim(),
+        startDate,
+        imageUrl: imageUrl.trim() || null,
+        scheduleUrl: scheduleUrl.trim() || null
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Generation failed')
       setResult(data); setEmailPreview(false)
     } catch (err) { setError(err.message) }
     finally { clearInterval(interval); setGenerating(false) }
@@ -111,17 +130,12 @@ export default function App() {
     if (!result) return
     setError(null); setSmsGenerating(true)
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          smsOnly: true,
-          listName: listName.trim(),
-          startDate,
-          scheduleUrl: scheduleUrl.trim() || result.schedule_url || null
-        })
+      const data = await postJson('/api/generate', {
+        smsOnly: true,
+        listName: listName.trim(),
+        startDate,
+        scheduleUrl: scheduleUrl.trim() || result.schedule_url || null
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'SMS generation failed')
       setSmsText(data.sms_text || '')
       setSmsShown(true)
     } catch (err) { setError(err.message) }
@@ -132,27 +146,22 @@ export default function App() {
     if (!revisionText.trim() || !result) return
     setError(null); setRevising(true)
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          listName: listName.trim(),
-          startDate,
-          imageUrl: imageUrl.trim() || null,
-          scheduleUrl: scheduleUrl.trim() || result.schedule_url || null,
-          revisionInstructions: revisionText.trim(),
-          currentEmailHtml: result.email_html,
-          preservedData: {
-            location: result.location,
-            week_label: result.week_label,
-            camps: result.camps,
-            listId: result.listId,
-            schedule_url: scheduleUrl.trim() || result.schedule_url || '',
-            subject_line: result.subject_line
-          }
-        })
+      const data = await postJson('/api/generate', {
+        listName: listName.trim(),
+        startDate,
+        imageUrl: imageUrl.trim() || null,
+        scheduleUrl: scheduleUrl.trim() || result.schedule_url || null,
+        revisionInstructions: revisionText.trim(),
+        currentEmailHtml: result.email_html,
+        preservedData: {
+          location: result.location,
+          week_label: result.week_label,
+          camps: result.camps,
+          listId: result.listId,
+          schedule_url: scheduleUrl.trim() || result.schedule_url || '',
+          subject_line: result.subject_line
+        }
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Revision failed')
       setResult(prev => ({ ...prev, email_html: data.email_html, subject_line: data.subject_line || prev.subject_line }))
       setRevisionText('')
       setEmailPreview(false)
@@ -164,45 +173,36 @@ export default function App() {
     if (!result) return
     setSavingEmail(true); setError(null)
     try {
-      const res = await fetch('/api/create-tasks', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          listId: result.listId,
-          weekLabel: result.week_label,
-          startDate,
-          parentId: savedParent?.id || null,
-          email: { html: result.email_html, subjectLine: result.subject_line }
-        })
+      const data = await postJson('/api/create-tasks', {
+        listId: result.listId,
+        weekLabel: result.week_label,
+        startDate,
+        parentId: savedParent?.id || null,
+        email: { html: result.email_html, subjectLine: result.subject_line }
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to save email')
       recordSaved(data); setEmailSaved(true)
     } catch (err) { setError(err.message) }
     finally { setSavingEmail(false) }
   }
 
   async function handleSaveSms() {
-    if (!smsText.trim()) return
+    if (!smsText.trim() || !result) return
     setSavingSms(true); setError(null)
     try {
-      const res = await fetch('/api/create-tasks', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          listId: result.listId,
-          weekLabel: result.week_label,
-          startDate,
-          parentId: savedParent?.id || null,
-          sms: { text: smsText }
-        })
+      const data = await postJson('/api/create-tasks', {
+        listId: result.listId,
+        weekLabel: result.week_label,
+        startDate,
+        parentId: savedParent?.id || null,
+        sms: { text: smsText }
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to save SMS')
       recordSaved(data); setSmsSaved(true)
     } catch (err) { setError(err.message) }
     finally { setSavingSms(false) }
   }
 
   const busy = generating || smsGenerating || savingEmail || savingSms || revising
+  const smsBusy = generating || smsGenerating
 
   return (
     <>
@@ -275,7 +275,7 @@ export default function App() {
 
             {error && (
               <div style={{ marginTop: 14, padding: '11px 14px', background: '#2a1010', border: '1px solid #7a2a2a', borderRadius: 8 }}>
-                <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>
+                <p style={{ color: '#f87171', fontSize: 13, lineHeight: 1.5 }}>{error}</p>
               </div>
             )}
           </div>
@@ -318,10 +318,10 @@ export default function App() {
                     ? <SavedPill label="Email saved" />
                     : (
                       <button
-                        onClick={handleSaveEmail} disabled={busy}
-                        style={{ background: (busy && !savingEmail) ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${(busy && !savingEmail) ? '#333' : BLUE}`, color: (busy && !savingEmail) ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
+                        onClick={handleSaveEmail} disabled={savingEmail}
+                        style={{ background: '#0d1f2d', border: `1px solid ${BLUE}`, color: BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: savingEmail ? 'default' : 'pointer', opacity: savingEmail ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
                       >
-                        {savingEmail ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>) : 'Save Email'}
+                        {savingEmail ? (<><SpinDot color={BLUE} />Saving...</>) : 'Save Email'}
                       </button>
                     )}
                 </div>
@@ -371,10 +371,10 @@ export default function App() {
                       <p style={{ fontSize: 11, color: '#555', marginTop: 3 }}>Optional &mdash; skip it for clients that don&rsquo;t get an SMS.</p>
                     </div>
                     <button
-                      onClick={handleGenerateSms} disabled={busy}
-                      style={{ background: busy ? '#1a1a1a' : `linear-gradient(135deg, ${LIME}, ${BLUE})`, color: busy ? '#555' : '#000', border: 'none', borderRadius: 8, padding: '11px 22px', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
+                      onClick={handleGenerateSms} disabled={smsBusy}
+                      style={{ background: smsBusy ? '#1a1a1a' : `linear-gradient(135deg, ${LIME}, ${BLUE})`, color: smsBusy ? '#555' : '#000', border: 'none', borderRadius: 8, padding: '11px 22px', fontSize: 13, fontWeight: 700, cursor: smsBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
                     >
-                      {smsGenerating ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: '#000', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Generating...</>) : 'Generate SMS'}
+                      {smsGenerating ? (<><SpinDot color="#000" />Generating...</>) : 'Generate SMS'}
                     </button>
                   </div>
                 ) : (
@@ -384,7 +384,12 @@ export default function App() {
                         <p style={{ fontSize: 11, color: LIME, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>Roundup SMS</p>
                         <p style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Editable. Saves as a PRIORITY SMS task, due 3 days before camp, assigned to Randi.</p>
                       </div>
-                      <CopyBtn text={smsText} label="Copy SMS" />
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={handleGenerateSms} disabled={smsBusy} style={{ background: 'transparent', border: '1px solid #444', color: smsBusy ? '#555' : '#aaa', borderRadius: 6, padding: '7px 12px', fontSize: 12, fontWeight: 600, cursor: smsBusy ? 'not-allowed' : 'pointer' }}>
+                          {smsGenerating ? 'Regenerating...' : 'Regenerate'}
+                        </button>
+                        <CopyBtn text={smsText} label="Copy SMS" />
+                      </div>
                     </div>
                     <textarea
                       value={smsText}
@@ -398,10 +403,10 @@ export default function App() {
                         ? <SavedPill label="SMS saved" />
                         : (
                           <button
-                            onClick={handleSaveSms} disabled={busy || !smsText.trim()}
-                            style={{ background: (busy || !smsText.trim()) ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${(busy || !smsText.trim()) ? '#333' : BLUE}`, color: (busy || !smsText.trim()) ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: (busy || !smsText.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
+                            onClick={handleSaveSms} disabled={savingSms || !smsText.trim()}
+                            style={{ background: (savingSms || !smsText.trim()) ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${(savingSms || !smsText.trim()) ? '#333' : BLUE}`, color: (savingSms || !smsText.trim()) ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: (savingSms || !smsText.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
                           >
-                            {savingSms ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>) : 'Save SMS'}
+                            {savingSms ? (<><SpinDot color={BLUE} />Saving...</>) : 'Save SMS'}
                           </button>
                         )}
                     </div>
@@ -432,7 +437,7 @@ export default function App() {
 
               <div style={{ borderTop: '1px solid #222', padding: '12px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <p style={{ fontSize: 11, color: '#444' }}>New camp week? Update inputs above and regenerate.</p>
-                <button onClick={handleGenerate} disabled={busy} style={{ background: 'transparent', border: `1px solid ${LIME}`, color: LIME, borderRadius: 6, padding: '7px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                <button onClick={handleGenerate} disabled={busy} style={{ background: 'transparent', border: `1px solid ${LIME}`, color: LIME, borderRadius: 6, padding: '7px 16px', fontSize: 12, fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
                   Regenerate
                 </button>
               </div>
