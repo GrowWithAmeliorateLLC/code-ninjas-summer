@@ -32,27 +32,62 @@ function CopyBtn({ text, label }) {
   )
 }
 
+function SavedPill({ label }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#0d2a1a', border: '1px solid #1a5c35', color: '#4ade80', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 13 }}>&#10003;</span>{label}
+    </span>
+  )
+}
+
 export default function App() {
   const [listName, setListName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [scheduleUrl, setScheduleUrl] = useState('')
+
   const [generating, setGenerating] = useState(false)
+  const [smsGenerating, setSmsGenerating] = useState(false)
+  const [savingEmail, setSavingEmail] = useState(false)
+  const [savingSms, setSavingSms] = useState(false)
   const [revising, setRevising] = useState(false)
-  const [saving, setSaving] = useState(false)
+
   const [genMsg, setGenMsg] = useState('')
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
-  const [savedTasks, setSavedTasks] = useState(null)
   const [emailPreview, setEmailPreview] = useState(false)
   const [revisionText, setRevisionText] = useState('')
-  const [smsText, setSmsText] = useState('')
 
-  const genMessages = ['Fetching camps from ClickUp...', 'Reading camp details...', 'Writing snippets...', 'Building email...', 'Writing the SMS...', 'Almost done...']
+  const [smsText, setSmsText] = useState('')
+  const [smsShown, setSmsShown] = useState(false)
+
+  const [savedParent, setSavedParent] = useState(null) // { id, name, url }
+  const [savedSubtasks, setSavedSubtasks] = useState([])
+  const [emailSaved, setEmailSaved] = useState(false)
+  const [smsSaved, setSmsSaved] = useState(false)
+
+  const genMessages = ['Fetching camps from ClickUp...', 'Reading camp details...', 'Writing snippets...', 'Building email...', 'Almost done...']
+
+  function resetSavedState() {
+    setSavedParent(null); setSavedSubtasks([]); setEmailSaved(false); setSmsSaved(false)
+  }
+
+  function recordSaved(data) {
+    setSavedParent({ id: data.parentId, name: data.parentName, url: data.parentUrl })
+    setSavedSubtasks(prev => {
+      const seen = new Set(prev.map(s => s.name))
+      const merged = [...prev]
+      for (const st of (data.subtasks || [])) if (!seen.has(st.name)) merged.push(st)
+      return merged
+    })
+  }
 
   async function handleGenerate() {
     if (!listName.trim() || !startDate) { setError('Please enter a ClickUp list name and a start date.'); return }
-    setError(null); setResult(null); setSavedTasks(null); setRevisionText(''); setSmsText(''); setGenerating(true); setGenMsg(genMessages[0])
+    setError(null); setResult(null); setRevisionText('')
+    setSmsText(''); setSmsShown(false)
+    resetSavedState()
+    setGenerating(true); setGenMsg(genMessages[0])
     let mi = 0
     const interval = setInterval(() => { mi = (mi + 1) % genMessages.length; setGenMsg(genMessages[mi]) }, 3000)
     try {
@@ -67,9 +102,30 @@ export default function App() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
-      setResult(data); setSmsText(data.sms_text || ''); setEmailPreview(false)
+      setResult(data); setEmailPreview(false)
     } catch (err) { setError(err.message) }
     finally { clearInterval(interval); setGenerating(false) }
+  }
+
+  async function handleGenerateSms() {
+    if (!result) return
+    setError(null); setSmsGenerating(true)
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          smsOnly: true,
+          listName: listName.trim(),
+          startDate,
+          scheduleUrl: scheduleUrl.trim() || result.schedule_url || null
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'SMS generation failed')
+      setSmsText(data.sms_text || '')
+      setSmsShown(true)
+    } catch (err) { setError(err.message) }
+    finally { setSmsGenerating(false) }
   }
 
   async function handleRevise() {
@@ -91,8 +147,7 @@ export default function App() {
             camps: result.camps,
             listId: result.listId,
             schedule_url: scheduleUrl.trim() || result.schedule_url || '',
-            subject_line: result.subject_line,
-            sms_text: smsText
+            subject_line: result.subject_line
           }
         })
       })
@@ -105,22 +160,49 @@ export default function App() {
     finally { setRevising(false) }
   }
 
-  async function handleSaveToClickUp() {
+  async function handleSaveEmail() {
     if (!result) return
-    setSaving(true); setError(null)
+    setSavingEmail(true); setError(null)
     try {
       const res = await fetch('/api/create-tasks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listName: listName.trim(), listId: result.listId, weekLabel: result.week_label, startDate, emailHtml: result.email_html, subjectLine: result.subject_line, smsText })
+        body: JSON.stringify({
+          listId: result.listId,
+          weekLabel: result.week_label,
+          startDate,
+          parentId: savedParent?.id || null,
+          email: { html: result.email_html, subjectLine: result.subject_line }
+        })
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to save to ClickUp')
-      setSavedTasks(data)
+      if (!res.ok) throw new Error(data.error || 'Failed to save email')
+      recordSaved(data); setEmailSaved(true)
     } catch (err) { setError(err.message) }
-    finally { setSaving(false) }
+    finally { setSavingEmail(false) }
   }
 
-  const busy = generating || revising || saving
+  async function handleSaveSms() {
+    if (!smsText.trim()) return
+    setSavingSms(true); setError(null)
+    try {
+      const res = await fetch('/api/create-tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listId: result.listId,
+          weekLabel: result.week_label,
+          startDate,
+          parentId: savedParent?.id || null,
+          sms: { text: smsText }
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to save SMS')
+      recordSaved(data); setSmsSaved(true)
+    } catch (err) { setError(err.message) }
+    finally { setSavingSms(false) }
+  }
+
+  const busy = generating || smsGenerating || savingEmail || savingSms || revising
 
   return (
     <>
@@ -160,7 +242,7 @@ export default function App() {
                 onClick={handleGenerate} disabled={busy}
                 style={{ background: busy ? '#222' : `linear-gradient(135deg, ${LIME}, ${BLUE})`, color: busy ? '#555' : '#000', border: 'none', borderRadius: 8, padding: '11px 26px', fontSize: 14, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
               >
-                {generating ? 'Generating...' : 'Generate'}
+                {generating ? 'Generating...' : 'Generate Email'}
               </button>
             </div>
 
@@ -212,7 +294,7 @@ export default function App() {
               <p style={{ fontSize: 16, color: '#fff', fontWeight: 700, marginBottom: 6 }}>Ready to generate</p>
               <p style={{ fontSize: 13, color: '#555', lineHeight: 1.7 }}>
                 Enter a ClickUp list name and the start of the camp week.<br />
-                Add an optional hero image or camps page URL, then hit Generate.
+                Generate the email first &mdash; you can add an SMS afterward.
               </p>
             </div>
           )}
@@ -232,23 +314,27 @@ export default function App() {
                     </div>
                   </div>
 
-                  {savedTasks ? (
-                    <div style={{ background: '#0d2a1a', border: '1px solid #1a5c35', borderRadius: 8, padding: '12px 16px', maxWidth: 240 }}>
-                      <p style={{ fontSize: 12, color: '#4ade80', fontWeight: 700, marginBottom: 6 }}>Saved to ClickUp</p>
-                      <a href={savedTasks.parentUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', fontSize: 12, color: BLUE, textDecoration: 'none', marginBottom: 4 }}>{savedTasks.parentName}</a>
-                      {savedTasks.subtasks?.map((st, i) => (
-                        <a key={i} href={st.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', fontSize: 11, color: '#888', textDecoration: 'none', marginBottom: 2, paddingLeft: 10 }}>{st.name}</a>
-                      ))}
-                    </div>
-                  ) : (
-                    <button
-                      onClick={handleSaveToClickUp} disabled={busy}
-                      style={{ background: busy ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${busy ? '#333' : BLUE}`, color: busy ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
-                    >
-                      {saving ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>) : 'Save to ClickUp'}
-                    </button>
-                  )}
+                  {emailSaved
+                    ? <SavedPill label="Email saved" />
+                    : (
+                      <button
+                        onClick={handleSaveEmail} disabled={busy}
+                        style={{ background: (busy && !savingEmail) ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${(busy && !savingEmail) ? '#333' : BLUE}`, color: (busy && !savingEmail) ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
+                      >
+                        {savingEmail ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>) : 'Save Email'}
+                      </button>
+                    )}
                 </div>
+
+                {savedParent && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: '#555', fontWeight: 700 }}>Saved to ClickUp:</span>
+                    <a href={savedParent.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: BLUE, textDecoration: 'none', fontWeight: 600 }}>{savedParent.name}</a>
+                    {savedSubtasks.map((st, i) => (
+                      <a key={i} href={st.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#777', textDecoration: 'none', background: '#111', border: '1px solid #2a2a2a', borderRadius: 12, padding: '2px 10px' }}>{st.name} &#8599;</a>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {result.subject_line && (
@@ -278,20 +364,49 @@ export default function App() {
               </div>
 
               <div style={{ borderTop: '1px solid #2a2a2a', padding: '22px', background: '#101510' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-                  <div>
-                    <p style={{ fontSize: 11, color: LIME, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>Roundup SMS</p>
-                    <p style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Editable. Saves to the SMS task&rsquo;s Text field &mdash; due 3 days before camp, PRIORITY, assigned to Randi.</p>
+                {!smsShown ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div>
+                      <p style={{ fontSize: 13, color: '#cbd5e1', fontWeight: 600 }}>Need a text for this week too?</p>
+                      <p style={{ fontSize: 11, color: '#555', marginTop: 3 }}>Optional &mdash; skip it for clients that don&rsquo;t get an SMS.</p>
+                    </div>
+                    <button
+                      onClick={handleGenerateSms} disabled={busy}
+                      style={{ background: busy ? '#1a1a1a' : `linear-gradient(135deg, ${LIME}, ${BLUE})`, color: busy ? '#555' : '#000', border: 'none', borderRadius: 8, padding: '11px 22px', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}
+                    >
+                      {smsGenerating ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: '#000', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Generating...</>) : 'Generate SMS'}
+                    </button>
                   </div>
-                  <CopyBtn text={smsText} label="Copy SMS" />
-                </div>
-                <textarea
-                  value={smsText}
-                  onChange={e => setSmsText(e.target.value)}
-                  placeholder="The Roundup SMS will appear here after you generate."
-                  style={{ width: '100%', height: 110, background: '#0d0d0d', border: `1.5px solid ${smsText ? LIME : '#333'}`, borderRadius: 8, color: '#e2e8f0', fontSize: 13, fontFamily: 'DM Sans, sans-serif', padding: 14, resize: 'vertical', outline: 'none', lineHeight: 1.6 }}
-                />
-                <p style={{ fontSize: 11, color: '#444', marginTop: 8 }}>{smsText.length} characters &middot; ~{Math.max(1, Math.ceil(smsText.length / 160))} SMS segment{Math.ceil(smsText.length / 160) !== 1 ? 's' : ''}</p>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                      <div>
+                        <p style={{ fontSize: 11, color: LIME, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>Roundup SMS</p>
+                        <p style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Editable. Saves as a PRIORITY SMS task, due 3 days before camp, assigned to Randi.</p>
+                      </div>
+                      <CopyBtn text={smsText} label="Copy SMS" />
+                    </div>
+                    <textarea
+                      value={smsText}
+                      onChange={e => setSmsText(e.target.value)}
+                      placeholder="No SMS copy returned. Add a Camps Page URL above and regenerate, or type your own."
+                      style={{ width: '100%', height: 110, background: '#0d0d0d', border: `1.5px solid ${smsText ? LIME : '#333'}`, borderRadius: 8, color: '#e2e8f0', fontSize: 13, fontFamily: 'DM Sans, sans-serif', padding: 14, resize: 'vertical', outline: 'none', lineHeight: 1.6 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, flexWrap: 'wrap', gap: 10 }}>
+                      <p style={{ fontSize: 11, color: '#444' }}>{smsText.length} characters &middot; ~{Math.max(1, Math.ceil(smsText.length / 160))} SMS segment{Math.ceil(smsText.length / 160) !== 1 ? 's' : ''}</p>
+                      {smsSaved
+                        ? <SavedPill label="SMS saved" />
+                        : (
+                          <button
+                            onClick={handleSaveSms} disabled={busy || !smsText.trim()}
+                            style={{ background: (busy || !smsText.trim()) ? '#1a1a1a' : '#0d1f2d', border: `1px solid ${(busy || !smsText.trim()) ? '#333' : BLUE}`, color: (busy || !smsText.trim()) ? '#555' : BLUE, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: (busy || !smsText.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
+                          >
+                            {savingSms ? (<><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #333', borderTopColor: BLUE, display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />Saving...</>) : 'Save SMS'}
+                          </button>
+                        )}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ borderTop: '1px solid #2a2a2a', padding: '20px 22px', background: '#141414' }}>

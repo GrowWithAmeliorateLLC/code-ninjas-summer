@@ -26,49 +26,60 @@ export default async (req) => {
   let body
   try { body = await req.json() } catch { return Response.json({ error: 'Invalid request body' }, { status: 400 }) }
 
-  const { listId, weekLabel, startDate, emailHtml, subjectLine, smsText } = body
-  if (!listId || !weekLabel) return Response.json({ error: 'Missing listId or weekLabel' }, { status: 400 })
+  const {
+    listId, weekLabel, startDate,
+    parentId: existingParentId,
+    email, sms,
+    emailHtml: legacyHtml, subjectLine: legacySubject, smsText: legacySms
+  } = body
+
+  if (!listId) return Response.json({ error: 'Missing listId' }, { status: 400 })
+
+  const emailPayload = email || (legacyHtml ? { html: legacyHtml, subjectLine: legacySubject } : null)
+  const smsPayload = sms || (legacySms ? { text: legacySms } : null)
+  if (!emailPayload && !(smsPayload && (smsPayload.text || '').trim())) {
+    return Response.json({ error: 'Nothing to save: provide email and/or sms.' }, { status: 400 })
+  }
 
   const dateObj = new Date((startDate || '') + 'T12:00:00Z')
   const dateStr = startDate
     ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' }).toUpperCase()
-    : weekLabel.replace('Week of ', '').toUpperCase()
+    : (weekLabel || '').replace(/^Week of /i, '').replace(/^Camps /i, '').toUpperCase()
   const parentName = `CAMPS WEEK OF ${dateStr}`
 
-  // Parent due date = camp week start date
-  // Email subtask due date  = 5 days before camp week start
-  // SMS subtask due date    = 3 days before camp week start
   const campStartMs = startDate ? new Date(startDate + 'T12:00:00Z').getTime() : null
-  const emailDueDateMs = campStartMs ? campStartMs - (5 * 24 * 60 * 60 * 1000) : null
-  const smsDueDateMs = campStartMs ? campStartMs - (3 * 24 * 60 * 60 * 1000) : null
+  const emailDueMs = campStartMs ? campStartMs - (5 * 24 * 60 * 60 * 1000) : null
+  const smsDueMs = campStartMs ? campStartMs - (3 * 24 * 60 * 60 * 1000) : null
 
-  const parent = await createTask(listId, parentName, null, null, campStartMs, CLICKUP_TOKEN)
-  if (!parent.id) return Response.json({ error: 'Failed to create parent task: ' + (parent.err || JSON.stringify(parent)) }, { status: 500 })
+  let parentTaskId = existingParentId || null
+  let parentUrl = existingParentId ? `https://app.clickup.com/t/${existingParentId}` : null
+  if (!parentTaskId) {
+    const parent = await createTask(listId, parentName, null, null, campStartMs, CLICKUP_TOKEN)
+    if (!parent.id) return Response.json({ error: 'Failed to create parent task: ' + (parent.err || JSON.stringify(parent)) }, { status: 500 })
+    parentTaskId = parent.id
+    parentUrl = parent.url || `https://app.clickup.com/t/${parent.id}`
+  }
 
   const subtasks = []
 
-  // Email subtask: HTML in Content field, subject line in Text field, due 5 days before camp
-  const emailFields = [
-    { id: CONTENT_FIELD_ID, value: emailHtml || '' },
-    ...(subjectLine ? [{ id: TEXT_FIELD_ID, value: subjectLine }] : [])
-  ]
-  const emailTask = await createTask(listId, 'Email', parent.id, emailFields, emailDueDateMs, CLICKUP_TOKEN)
-  subtasks.push({ name: 'Email', url: emailTask.url || `https://app.clickup.com/t/${emailTask.id}` })
-
-  // SMS subtask: Roundup copy in Text field, due 3 days before camp, PRIORITY, assigned to Randi
-  if (smsText && smsText.trim()) {
-    const smsFields = [{ id: TEXT_FIELD_ID, value: smsText.trim() }]
-    const smsTask = await createTask(listId, 'SMS', parent.id, smsFields, smsDueDateMs, CLICKUP_TOKEN, { status: 'priority', assignees: [RANDI_ID] })
-    if (smsTask.id) {
-      subtasks.push({ name: 'SMS', url: smsTask.url || `https://app.clickup.com/t/${smsTask.id}` })
-    }
+  if (emailPayload) {
+    const fields = [
+      { id: CONTENT_FIELD_ID, value: emailPayload.html || '' },
+      ...(emailPayload.subjectLine ? [{ id: TEXT_FIELD_ID, value: emailPayload.subjectLine }] : [])
+    ]
+    const t = await createTask(listId, 'Email', parentTaskId, fields, emailDueMs, CLICKUP_TOKEN)
+    if (!t.id) return Response.json({ error: 'Failed to create Email task: ' + (t.err || JSON.stringify(t)), parentId: parentTaskId, parentUrl }, { status: 500 })
+    subtasks.push({ name: 'Email', url: t.url || `https://app.clickup.com/t/${t.id}` })
   }
 
-  return Response.json({
-    parentName,
-    parentUrl: parent.url || `https://app.clickup.com/t/${parent.id}`,
-    subtasks
-  })
+  if (smsPayload && (smsPayload.text || '').trim()) {
+    const fields = [{ id: TEXT_FIELD_ID, value: smsPayload.text.trim() }]
+    const t = await createTask(listId, 'SMS', parentTaskId, fields, smsDueMs, CLICKUP_TOKEN, { status: 'priority', assignees: [RANDI_ID] })
+    if (!t.id) return Response.json({ error: 'Failed to create SMS task: ' + (t.err || JSON.stringify(t)), parentId: parentTaskId, parentUrl }, { status: 500 })
+    subtasks.push({ name: 'SMS', url: t.url || `https://app.clickup.com/t/${t.id}` })
+  }
+
+  return Response.json({ parentId: parentTaskId, parentName, parentUrl, subtasks })
 }
 
 export const config = { path: '/api/create-tasks' }
