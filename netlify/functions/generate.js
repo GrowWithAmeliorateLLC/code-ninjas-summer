@@ -335,8 +335,32 @@ export default async (req) => {
 
     if (revisionInstructions && currentEmailHtml) {
       const revised = await reviseEmail(currentEmailHtml, revisionInstructions, preservedData)
-      // Preserve the SMS through email revisions.
-      return Response.json({ ...revised, sms_text: preservedData?.sms_text })
+      return Response.json(revised)
+    }
+
+    // --- SMS-ONLY MODE (opt-in second step; no AI call) ---
+    if (body.smsOnly) {
+      if (!listName || !startDate) {
+        return Response.json({ error: 'listName and startDate are required' }, { status: 400 })
+      }
+      const list = await findListByName(listName, CU_TOKEN)
+      const listId = list.id
+      const tasks = await getCampsForWeek(listId, startDate, CU_TOKEN)
+      if (!tasks.length) {
+        return Response.json({ error: `No camps found in "${listName}" for the week of ${startDate}.` }, { status: 404 })
+      }
+      const location = listName.replace(/^CN_/i, '').replace(/([A-Z])/g, ' $1').trim()
+      let smsScheduleUrl = scheduleUrl || ''
+      if (!smsScheduleUrl) {
+        try {
+          const allData = await cuFetch(`/list/${listId}/task?archived=false&subtasks=true&include_closed=true`, CU_TOKEN)
+          smsScheduleUrl = findScheduleUrl(allData.tasks || []) || ''
+        } catch (e) {
+          console.error('schedule url lookup failed:', e.message)
+        }
+      }
+      const sms_text = buildRoundupSms({ location, camps: tasks.map(t => ({ name: t.name })), scheduleUrl: smsScheduleUrl, startDate })
+      return Response.json({ sms_text, schedule_url: smsScheduleUrl, location, listId })
     }
 
     if (!listName || !startDate) {
@@ -398,26 +422,13 @@ export default async (req) => {
       subject_line: aiContent.subject_line || DEFAULT_SUBJECT
     })
 
-    // Build the Roundup SMS from the same camp data, in the same pass as the email.
-    let smsScheduleUrl = resolvedScheduleUrl
-    if (!smsScheduleUrl) {
-      try {
-        const allData = await cuFetch(`/list/${listId}/task?archived=false&subtasks=true&include_closed=true`, CU_TOKEN)
-        smsScheduleUrl = findScheduleUrl(allData.tasks || []) || ''
-      } catch (e) {
-        console.error('schedule url lookup failed:', e.message)
-      }
-    }
-    const sms_text = buildRoundupSms({ location, camps: campDetails, scheduleUrl: smsScheduleUrl, startDate })
-
     return Response.json({
       email_html,
       subject_line: aiContent.subject_line || DEFAULT_SUBJECT,
       location, week_label,
       camps: camps.map(c => ({ name: c.name })),
       listId,
-      schedule_url: resolvedScheduleUrl,
-      sms_text
+      schedule_url: resolvedScheduleUrl
     })
 
   } catch (err) {
